@@ -2,3 +2,5 @@
 /build/
 *.tmp
 export_presets.cfg
+tests/_*.gd
+tests/_*.gd.uid
