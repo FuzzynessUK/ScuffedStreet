@@ -8,7 +8,9 @@ Placeholder graphics only for now.
 
 ## Run
 
-Open the folder in Godot 4.7 and press F5, or:
+Double-click **Play.bat** (it refreshes the import cache, then starts the game
+without the editor; set `GODOT` if Godot is not in `D:DownloadsGodot_v4.7.2-stable_win64.exe`).
+`Play.bat --watch` starts an all-CPU game. Or open the folder in Godot 4.7 and press F5, or:
 
     Godot_v4.7.2-stable_win64.exe --path .
 
