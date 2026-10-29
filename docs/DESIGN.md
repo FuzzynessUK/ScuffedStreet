@@ -27,8 +27,12 @@ salary) are used freely; specific mechanics are not copied from any game.
 ## Movement
 
 - Roll **2d4** (2–8), so movement is more predictable than one big die.
-- Move exactly that many spaces. At a junction the player picks a branch.
-  You may never step back onto the space you just came from.
+- Move exactly that many spaces, one step at a time. At a junction the player
+  picks a branch. You may never step back onto the space you just came from,
+  but while planning you can press **Back** to undo steps. After the last
+  step the game asks **"Go here?"**; only a confirmed route counts.
+- Standing on or passing over a lot shows its details: owner and tier, lot
+  value, rent, next renovation cost and how much of the block the owner holds.
 - Spaces passed through can trigger "pass" effects (Depot, Relays); only the
   final space triggers its "land" effect.
 

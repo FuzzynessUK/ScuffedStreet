@@ -188,12 +188,18 @@ func roll() -> int:
 ## Spaces the current player may step to next.
 func options() -> Array[int]:
 	var p := current_player()
+	return options_from(p.position, p.came_from)
+
+
+## Spaces reachable in one step from `at` having arrived from `came_from`
+## (used to plan a route before committing to it).
+func options_from(at: int, came_from: int) -> Array[int]:
 	var out: Array[int] = []
-	for n in space(p.position).next:
-		if n != p.came_from:
+	for n in space(at).next:
+		if n != came_from:
 			out.append(n)
 	if out.is_empty():
-		out.assign(space(p.position).next)
+		out.assign(space(at).next)
 	return out
 
 

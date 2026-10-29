@@ -15,6 +15,7 @@ const TICKER_SPIN := 1.2  # seconds a moved bond price spins before settling
 const TICKER_HOLD := 1.6  # seconds the ticker stays up afterwards
 const RENOVATION_SHOW := 1.6  # seconds the camera pulls back for a renovation
 const CARD_SIZE := Vector2(320, 420)
+const LOT_ROWS := ["Lot value", "Rent", "Next renovation", "Block"]
 const CARD_SPIN := 1.3       # seconds the drawn card spins before landing
 const CARD_HALF_TURNS := 7   # odd, so it lands face up
 const HEAP_BACK := Color("#f29bd0")  # card backs: the Wildcard space colour
@@ -54,6 +55,10 @@ var card_box: PanelContainer
 var card_name: Label
 var card_text: Label
 var card_bonus: Label
+var lot_panel: PanelContainer
+var lot_ribbon: Label
+var lot_name: Label
+var lot_values := {}  # LOT_ROWS caption -> value label
 var heap_panel: Control
 var heap_title: Label
 var heap_reveal: Label
@@ -123,6 +128,7 @@ func _build_ui() -> void:
 	_build_market(board_area)
 	_build_ticker(board_area)
 	_build_card_view(board_area)
+	_build_lot_panel(board_area)
 
 	var panel := PanelContainer.new()
 	panel.custom_minimum_size = Vector2(400, 0)
@@ -247,6 +253,7 @@ func _play_turn() -> void:
 	_refresh()
 	if p.position == game.board.depot:
 		await _market(p, "Start of turn at the Depot: trade bonds?")
+	lot_panel.visible = false
 	if game.take_skip():
 		_refresh()
 		await _wait(CPU_DELAY)
@@ -259,21 +266,162 @@ func _move_and_land(p: PlayerState, prompt: String) -> void:
 	await _ask(p, prompt, [["Roll", true]], true)
 	game.roll()
 	_refresh()
-	while game.moves_left > 0 and not game.game_over:
-		var opts := game.options()
-		var to := opts[0]
-		if opts.size() > 1:
-			to = await _choose_branch(p, opts)
-		game.step(to)
-		_refresh()
-		await _hold_for_shows()
-		await _wait(STEP_DELAY)
+	if p.is_cpu:
+		while game.moves_left > 0 and not game.game_over:
+			var opts := game.options()
+			var to := opts[0]
+			if opts.size() > 1:
+				to = await _choose_branch(p, opts)
+			game.step(to)
+			_refresh()
+			_show_space_info(p.position)
+			await _hold_for_shows()
+			await _wait(STEP_DELAY)
+	else:
+		await _plan_route(p)
 	if game.game_over:
 		return
 	await _land(p)
 
 
+## A human walks their roll one space at a time: Back undoes a step, and the
+## last step asks "Go here?". Nothing on the way counts until it is confirmed;
+## then the route is played through the rules (suits, PAYDAY, ...).
+func _plan_route(p: PlayerState) -> void:
+	var total := game.moves_left
+	var path: Array[int] = []
+	board_view.zoom_for_highlight = false
+	while true:
+		var here: int = path[-1] if not path.is_empty() else p.position
+		var prev: int = p.came_from
+		if path.size() >= 2:
+			prev = path[-2]
+		elif path.size() == 1:
+			prev = p.position
+		board_view.preview(p.index, here)
+		_show_space_info(here)
+		if path.size() == total:
+			board_view.highlight = []
+			board_view.sync()
+			var go: bool = await _ask(p, "Go here? (%s)" % _space_title(here),
+					[["Go here", true], ["Back", false]])
+			if go:
+				break
+			path.pop_back()
+			continue
+		var opts := game.options_from(here, prev)
+		board_view.highlight = opts
+		board_view.sync()
+		var choices := []
+		for o in opts:
+			choices.append(["Step to %s" % _space_title(o), o])
+		if not path.is_empty():
+			choices.append(["Back", -1])
+		var pick: int = await _ask(p, "%d of %d moves left." % [total - path.size(), total], choices)
+		if pick == -1:
+			path.pop_back()
+		else:
+			path.append(pick)
+	board_view.highlight = []
+	board_view.zoom_for_highlight = true
+	board_view.clear_preview(p.index)
+	for to in path:
+		game.step(to)
+		_refresh()
+		await _hold_for_shows()
+		if game.game_over:
+			return
+
+
+## A short name for a space on buttons: the lot's name, the suit, or the type.
+func _space_title(id: int) -> String:
+	var s := game.space(id)
+	match s.type:
+		"lot":
+			return s.name
+		"relay":
+			return "%s %s" % [BoardView.SUIT_SYMBOLS.get(s.mark, ""), s.mark]
+		"wildcard":
+			return "Wildcard ?"
+	return s.type.capitalize()
+
+
+## Lot details shown while a figure stands on (or walks over) a lot.
+func _build_lot_panel(parent: Control) -> void:
+	lot_panel = PanelContainer.new()
+	lot_panel.set_anchors_preset(Control.PRESET_CENTER_LEFT)
+	lot_panel.offset_left = 12
+	lot_panel.offset_top = -150
+	lot_panel.offset_right = 232
+	lot_panel.visible = false
+	var bg := StyleBoxFlat.new()
+	bg.bg_color = Color("#2a2f3a", 0.95)
+	bg.set_corner_radius_all(10)
+	bg.set_content_margin_all(12)
+	lot_panel.add_theme_stylebox_override("panel", bg)
+	parent.add_child(lot_panel)
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 3)
+	lot_panel.add_child(col)
+	lot_ribbon = Label.new()
+	lot_ribbon.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lot_ribbon.add_theme_font_size_override("font_size", 16)
+	col.add_child(lot_ribbon)
+	lot_name = Label.new()
+	lot_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	lot_name.add_theme_font_size_override("font_size", 20)
+	col.add_child(lot_name)
+	for key in LOT_ROWS:
+		var caption := Label.new()
+		caption.text = key
+		caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		caption.add_theme_font_size_override("font_size", 15)
+		caption.add_theme_color_override("font_color", Color("#dfe3ea"))
+		col.add_child(caption)
+		var value := Label.new()
+		value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		value.add_theme_font_size_override("font_size", 22)
+		var bar := StyleBoxFlat.new()
+		bar.bg_color = Color("#0d0f14")
+		bar.set_content_margin_all(3)
+		bar.content_margin_right = 10
+		value.add_theme_stylebox_override("normal", bar)
+		col.add_child(value)
+		lot_values[key] = value
+
+
+func _show_space_info(id: int) -> void:
+	var s := game.space(id)
+	if s.type != "lot":
+		lot_panel.visible = false
+		return
+	var lot: Dictionary = game.lots[id]
+	var owner: int = lot.owner
+	var ribbon := StyleBoxFlat.new()
+	ribbon.set_corner_radius_all(6)
+	ribbon.set_content_margin_all(4)
+	if owner >= 0:
+		ribbon.bg_color = BoardView.PLAYER_COLORS[owner]
+		lot_ribbon.text = "%s  ·  %s" % [game.players[owner].name, GameState.TIER_NAMES[lot.tier]]
+	else:
+		ribbon.bg_color = game.board.blocks[s.block].color
+		lot_ribbon.text = "For sale"
+	lot_ribbon.add_theme_stylebox_override("normal", ribbon)
+	lot_name.text = s.name
+	var block: String = s.block
+	var total := game.board.lots_in_block(block).size()
+	var held := game.owned_in_block(owner, block) if owner >= 0 else 0
+	var reno := game.renovate_cost(id)
+	lot_values["Lot value"].text = "%d S" % game.lot_value(id)
+	lot_values["Rent"].text = "%d S" % game.rent(id) if owner >= 0 \
+			else "%d S" % roundi(game.lot_value(id) * GameState.TIER_RENT[0])
+	lot_values["Next renovation"].text = "%d S" % reno if reno > 0 else "Max"
+	lot_values["Block"].text = "%s  %d/%d" % [game.board.blocks[block].name, held, total]
+	lot_panel.visible = true
+
+
 func _land(p: PlayerState) -> void:
+	_show_space_info(p.position)
 	var offers := game.land()
 	_refresh()
 	await _resolve(p, offers)
@@ -370,6 +518,7 @@ func _wildcard(p: PlayerState) -> void:
 
 
 func _pick_from_heap(p: PlayerState) -> int:
+	lot_panel.visible = false
 	heap_panel.visible = true
 	heap_title.text = "%s: pick a card from the Scrap Heap" % p.name
 	heap_hint.text = "Cards next to your own (up, down, left, right) pay %d for each card in the patch after the first." % GameState.PATCH_BONUS
@@ -446,6 +595,7 @@ func _market(p: PlayerState, prompt: String) -> void:
 	if _market_block == "" or not game.board.blocks.has(_market_block):
 		_market_block = game.board.blocks.keys()[0]
 	_market_qty = BOND_LOT
+	lot_panel.visible = false
 	market_panel.visible = true
 	while true:
 		_fill_market(p)

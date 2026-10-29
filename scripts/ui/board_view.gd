@@ -35,6 +35,7 @@ const SUIT_SYMBOLS := {"Spade": "♠", "Heart": "♥", "Diamond": "♦", "Club":
 
 var game: GameState
 var highlight: Array[int] = []  # spaces offered as a branch choice
+var zoom_for_highlight := true  # pull back to the whole board while highlighting
 
 var _camera: Camera3D
 var _root: Node3D
@@ -47,6 +48,7 @@ var _popups: Array[Label3D] = []
 var _spinners: Array[Node3D] = []  # suit symbols swaying above the Relays
 var _time := 0.0
 var _center := Vector3.ZERO  # middle of the board
+var _preview := {}  # player index -> space shown while planning a route
 var _overview_pos := Vector3.ZERO
 var _overview_look := Vector3.ZERO
 var _overview_until := 0.0  # show the whole board until this _time
@@ -81,6 +83,7 @@ func build(g: GameState) -> void:
 	_root = Node3D.new()
 	add_child(_root)
 	_tiles.clear()
+	_preview.clear()
 	_tokens.clear()
 	_token_space.clear()
 	_arrows.clear()
@@ -177,10 +180,11 @@ func sync(instant := false) -> void:
 	for p in game.players:
 		var holder := _tokens[p.index]
 		holder.visible = not p.broke
+		var shown: int = _preview.get(p.index, p.position)
 		var target := _token_spot(p.index)
-		if _token_space[p.index] == p.position:
+		if _token_space[p.index] == shown:
 			continue
-		_token_space[p.index] = p.position
+		_token_space[p.index] = shown
 		if instant:
 			holder.position = target
 			holder.rotation.y = 0.0  # face the camera
@@ -196,6 +200,16 @@ func popup_at_space(id: int, text: String, color: Color) -> void:
 	_popup(_pos(id) + Vector3(0, 0.9, 0), text, color)
 
 
+## Shows player `index` standing on `id` while they plan a route (the game
+## state only changes once the route is confirmed).
+func preview(index: int, id: int) -> void:
+	_preview[index] = id
+	sync()
+
+
+func clear_preview(index: int) -> void:
+	_preview.erase(index)
+
 ## Pulls the camera back to show the whole board for `seconds`.
 func overview(seconds: float) -> void:
 	_overview_until = maxf(_overview_until, _time + seconds)
@@ -206,7 +220,7 @@ func overview(seconds: float) -> void:
 func _move_camera(delta: float) -> void:
 	var look := _overview_look
 	var pos := _overview_pos
-	if _time >= _overview_until and highlight.is_empty():
+	if _time >= _overview_until and (highlight.is_empty() or not zoom_for_highlight):
 		look = _tokens[game.current].position
 		pos = look + CAMERA_DIR.normalized() * FOLLOW_DIST
 	var k := minf(1.0, delta * CAMERA_EASE)
@@ -508,7 +522,7 @@ func _pos(id: int) -> Vector3:
 func _token_spot(index: int) -> Vector3:
 	var p := game.players[index]
 	var off := Vector3(-0.3 if index % 2 == 0 else 0.3, TILE_H, -0.3 if index < 2 else 0.3)
-	return _pos(p.position) + off
+	return _pos(_preview.get(index, p.position)) + off
 
 
 func _material(color: Color, glow := 0.0) -> StandardMaterial3D:
