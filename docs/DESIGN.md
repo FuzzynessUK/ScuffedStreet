@@ -111,30 +111,37 @@ Landing on a rival's lot, after paying rent you may **buy it out** for
 | Detour   | Warp to the paired Detour space; your move ends there. |
 | Junction | No effect; a branch point (any space may branch, this one is just empty). |
 
-## Wildcard deck (first draft)
+## Wildcards and the Scrap Heap
 
-Shuffled 20-card deck; discards reshuffle when it runs out.
+Landing on a Wildcard space opens the **Scrap Heap**: a 5×4 grid of face-down
+cards holding one of each of the 20 Wildcards in random order. The player picks
+a card, it turns over and takes effect, and that slot stays empty. When every
+card has been taken the heap is reshuffled and refilled. Cards are kept by id
+(`scripts/core/wildcards.gd`) so a card can later launch a minigame.
 
-1. **Scrap drive** — every player pays you 40 S.
-2. **Parking ticket** — pay 100 S to the Pot.
-3. **Rush hour** — roll again now and move.
-4. **Inspection** — pay 25 S per renovation tier you own.
-5. **Grand opening** — choose one of your lots: +20% value (permanent).
-6. **Power cut** — choose a rival's lot: it charges no rent until their next turn.
-7. **Lucky find** — gain 150 S.
-8. **Bond bump** — choose a block: its bond price +15% until its value changes.
-9. **Bond slump** — choose a block: its bond price −15% until its value changes.
-10. **Shortcut** — move to the nearest Relay you have not punched (no salary for passing Depot).
-11. **Tax refund** — gain 5% of your lot value.
-12. **Swap meet** — swap one of your Shacks with a rival's Shack of lower or equal value (their consent not needed).
-13. **Charity** — the richest player gives 100 S to the poorest.
-14. **Back to base** — go to the Depot (collect salary).
-15. **Free renovation** — renovate one lot by one tier for free.
-16. **Pot luck** — take half the Pot.
-17. **Heavy traffic** — skip your next roll; you still get your turn's actions.
-18. **Double rent** — the next rent you collect is doubled.
-19. **Market tip** — buy up to 10 bonds anywhere now at −10%.
-20. **Scrap tax** — pay 10% of your cash to the bank.
+Cards that need a choice (a lot, a block, a swap) do nothing if there is no
+valid choice. Only Swap Meet may be declined.
+
+1. **Scrap Drive** — every other player pays you 40.
+2. **Parking Ticket** — pay 100 into the Pot.
+3. **Rush Hour** — roll again and move.
+4. **Inspection** — pay 25 to the bank for every renovation tier you own.
+5. **Grand Opening** — one of your lots gains +20% value for good.
+6. **Power Cut** — a rival's lot charges no rent until its owner's next turn.
+7. **Lucky Find** — gain 150.
+8. **Bond Bump** — a block's bond price rises 15% until its value changes.
+9. **Bond Slump** — a block's bond price falls 15% until its value changes.
+10. **Shortcut** — jump to the nearest Relay you haven't punched (punch it, land there; no salary for skipping past the Depot).
+11. **Tax Refund** — gain 5% of your lot value.
+12. **Swap Meet** — swap one of your Shacks for a rival's Shack, paying them the difference if theirs is worth more.
+13. **Charity** — the richest player gives 100 to the poorest.
+14. **Back to Base** — go straight to the Depot, collect salary (wins if at goal).
+15. **Free Renovation** — renovate one of your lots by one tier for free.
+16. **Pot Luck** — take half the Pot.
+17. **Heavy Traffic** — you don't move on your next turn.
+18. **Double Rent** — the next rent you collect is doubled.
+19. **Market Tip** — buy up to 10 bonds in a block at 10% off.
+20. **Scrap Tax** — pay 10% of your cash to the bank.
 
 ## Bankruptcy
 

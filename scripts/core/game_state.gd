@@ -25,7 +25,7 @@ const BOND_PRESSURE := 0.10
 
 var board: Board
 var players: Array[PlayerState] = []
-var lots := {}           # lot space id -> {owner: int, tier: int, boost: float}
+var lots := {}           # lot space id -> {owner, tier, boost: float, blackout: bool}
 var bond_pressure := {}  # block id -> price multiplier until its value next changes
 var pot := 0
 var current := 0
@@ -35,6 +35,7 @@ var winner := -1
 var game_over := false
 var events: Array[Dictionary] = []
 var rng := RandomNumberGenerator.new()
+var heap: Array[int] = []  # Scrap Heap: a Wildcard id per slot, -1 once taken
 
 
 func setup(p_board: Board, names: Array, cpu: Array = [], seed := -1) -> void:
@@ -54,9 +55,10 @@ func setup(p_board: Board, names: Array, cpu: Array = [], seed := -1) -> void:
 		players.append(p)
 	lots.clear()
 	for id in board.lot_ids():
-		lots[id] = {"owner": -1, "tier": 0, "boost": 1.0}
+		lots[id] = _new_lot()
 	bond_pressure.clear()
 	pot = 0
+	_refill_heap()
 	current = 0
 	turn = 1
 	winner = -1
@@ -102,7 +104,7 @@ func block_multiplier(id: int) -> float:
 
 func rent(id: int) -> int:
 	var lot: Dictionary = lots[id]
-	if lot.owner < 0:
+	if lot.owner < 0 or lot.blackout:
 		return 0
 	return roundi(lot_value(id) * TIER_RENT[lot.tier] * block_multiplier(id))
 
@@ -159,6 +161,9 @@ func current_player() -> PlayerState:
 func start_turn() -> void:
 	var p := current_player()
 	p.at_goal = net_worth(p) >= board.goal
+	for id in lots:
+		if lots[id].owner == p.index:
+			lots[id].blackout = false
 	_note("Turn %d: %s (net worth %d)" % [turn, p.name, net_worth(p)], "info", current)
 
 
@@ -254,7 +259,7 @@ func land() -> Array[Dictionary]:
 			p.position = s.pair
 			_note("%s takes the detour to %s" % [p.name, _label(s.pair)], "info", p.index, s.pair)
 		"wildcard":
-			_note("%s lands on a Wildcard (deck not implemented yet)" % p.name, "info", p.index, id)
+			offers.append({"kind": "wildcard"})
 	return offers
 
 
@@ -313,6 +318,9 @@ func pay_rent(p: PlayerState, id: int) -> void:
 	if amount <= 0:
 		return
 	var owner := players[lots[id].owner]
+	if owner.double_rent:
+		amount *= 2
+		owner.double_rent = false
 	_note("%s pays %d rent to %s" % [p.name, amount, owner.name], "loss", p.index, id)
 	charge(p, amount, owner.index)
 	var block: String = space(id).block
@@ -386,7 +394,7 @@ func raise_cash(p: PlayerState, needed: int) -> void:
 		var price := roundi(lot_value(id) * BANK_SELL_RATE)
 		p.cash += price
 		raised += price
-		lots[id] = {"owner": -1, "tier": 0, "boost": 1.0}
+		lots[id] = _new_lot()
 		bond_pressure.erase(space(id).block)
 		_note("%s sells %s to the bank for %d" % [p.name, _label(id), price], "loss", p.index, id)
 
@@ -412,3 +420,51 @@ func _label(id: int) -> String:
 
 func _note(text: String, kind := "info", player := -1, at := -1) -> void:
 	events.append({"text": text, "kind": kind, "player": player, "space": at})
+
+
+func _new_lot() -> Dictionary:
+	return {"owner": -1, "tier": 0, "boost": 1.0, "blackout": false}
+
+
+# --- Scrap Heap -----------------------------------------------------------
+
+func _refill_heap() -> void:
+	heap.clear()
+	for i in Wildcards.CARDS.size():
+		heap.append(i)
+	for i in range(heap.size() - 1, 0, -1):
+		var j := rng.randi_range(0, i)
+		var t := heap[i]
+		heap[i] = heap[j]
+		heap[j] = t
+
+
+## Takes the card in `slot`; the heap refills once every card has been taken.
+func take_from_heap(slot: int) -> int:
+	var id := heap[slot]
+	assert(id >= 0, "slot already taken")
+	heap[slot] = -1
+	_note("%s turns over card %d of the Scrap Heap" % [current_player().name, slot + 1],
+			"info", current)
+	if heap.all(func(c): return c < 0):
+		_refill_heap()
+		_note("The Scrap Heap is reshuffled", "info")
+	return id
+
+
+func heap_slots_left() -> Array[int]:
+	var out: Array[int] = []
+	for i in heap.size():
+		if heap[i] >= 0:
+			out.append(i)
+	return out
+
+
+## Heavy Traffic: true (and cleared) if the current player loses this move.
+func take_skip() -> bool:
+	var p := current_player()
+	if not p.skip_move:
+		return false
+	p.skip_move = false
+	_note("%s is stuck in traffic and doesn't move" % p.name, "loss", p.index, p.position)
+	return true

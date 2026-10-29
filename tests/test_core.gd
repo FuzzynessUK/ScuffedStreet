@@ -16,6 +16,7 @@ func _init() -> void:
 	test_bonds()
 	test_bankruptcy()
 	test_goal_win()
+	test_wildcards()
 	print("%d checks, %d failed" % [checks, failures])
 	quit(1 if failures > 0 else 0)
 
@@ -161,3 +162,52 @@ func test_goal_win() -> void:
 	g.moves_left = 3
 	g.step(0)
 	check(g.game_over and g.winner == 0, "passing depot at goal wins")
+
+
+func test_wildcards() -> void:
+	var g := new_game()
+	var p := g.players[0]
+	var q := g.players[1]
+	check(g.heap.size() == 20 and g.heap_slots_left().size() == 20, "heap starts full")
+	var seen := {}
+	for i in 20:
+		seen[g.take_from_heap(g.heap_slots_left()[0])] = true
+	check(seen.size() == 20, "heap holds every card once")
+	check(g.heap_slots_left().size() == 20, "heap refills when empty")
+
+	g.buy_lot(q, 5)
+	Wildcards.apply(g, p, 5, 5)  # Power Cut
+	check(g.rent(5) == 0, "power cut: no rent")
+	g.current = 1
+	g.start_turn()
+	check(g.rent(5) > 0, "power back on the owner's turn")
+
+	Wildcards.apply(g, q, 17)  # Double Rent
+	var before := q.cash
+	var rent := g.rent(5)
+	g.pay_rent(p, 5)
+	check(q.cash == before + rent * 2, "double rent")
+	check(not q.double_rent, "double rent used up")
+
+	g.buy_lot(p, 1)
+	check(Wildcards.choices(g, p, 11).has([1, 5]), "swap offers shack for shack")
+	Wildcards.apply(g, p, 11, [1, 5])  # Swap Meet
+	check(g.lots[5].owner == 0 and g.lots[1].owner == 1, "swap meet swaps owners")
+
+	g.current = 0
+	p.position = 10
+	before = p.cash
+	var r := Wildcards.apply(g, p, 13)  # Back to Base
+	check(p.position == 0 and r.get("land_again", false), "back to base")
+	check(p.cash > before, "back to base pays salary")
+
+	p.position = 1
+	p.punches.clear()
+	Wildcards.apply(g, p, 9)  # Shortcut
+	check(p.position == 4 and 4 in p.punches, "shortcut to the next relay")
+
+	check(Wildcards.apply(g, p, 2).get("move_again", false), "rush hour moves again")
+	Wildcards.apply(g, p, 16)
+	check(g.take_skip() and not g.take_skip(), "heavy traffic skips once")
+	check(Wildcards.choices(g, g.players[1], 14).size() > 0, "free renovation needs a lot")
+	check(Wildcards.apply(g, p, 4).is_empty(), "picking card with no pick fizzles")
