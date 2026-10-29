@@ -27,6 +27,7 @@ var board: Board
 var players: Array[PlayerState] = []
 var lots := {}           # lot space id -> {owner, tier, boost: float, blackout: bool}
 var bond_pressure := {}  # block id -> price multiplier until its value next changes
+var bond_round_start := {}  # block id -> bond price when this round began
 var pot := 0
 var current := 0
 var turn := 1
@@ -59,6 +60,7 @@ func setup(p_board: Board, names: Array, cpu: Array = [], seed := -1) -> void:
 	bond_pressure.clear()
 	pot = 0
 	_refill_heap()
+	snapshot_bond_prices()
 	current = 0
 	turn = 1
 	winner = -1
@@ -271,6 +273,7 @@ func end_turn() -> void:
 		current = (current + 1) % n
 		if current == 0:
 			turn += 1
+			snapshot_bond_prices()
 		if not players[current].broke:
 			return
 
@@ -468,3 +471,22 @@ func take_skip() -> bool:
 	p.skip_move = false
 	_note("%s is stuck in traffic and doesn't move" % p.name, "loss", p.index, p.position)
 	return true
+
+
+# --- bond prices over time --------------------------------------------------
+
+func snapshot_bond_prices() -> void:
+	for block in board.blocks:
+		bond_round_start[block] = bond_price(block)
+
+
+## How far the block's bond price has moved since this round began.
+func bond_change(block: String) -> int:
+	return bond_price(block) - bond_round_start.get(block, bond_price(block))
+
+
+func bonds_held(block: String) -> int:
+	var n := 0
+	for q in players:
+		n += q.bonds_in(block)
+	return n

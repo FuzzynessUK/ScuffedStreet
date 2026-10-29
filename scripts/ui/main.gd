@@ -4,6 +4,7 @@ extends Control
 
 signal chosen(value)
 signal heap_picked(slot: int)
+signal market_action(act: Array)
 
 const BOARD_PATH := "res://boards/scrapyard_loop.json"
 const STEP_DELAY := 0.32
@@ -11,6 +12,7 @@ const CPU_DELAY := 0.6
 const BOND_LOT := 5  # bonds per market button press
 const HEAP_COLUMNS := 5
 const HEAP_BACK := Color("#f29bd0")  # card backs: the Wildcard space colour
+const MARKET_HEADERS := ["Block", "Price", "This round", "Block value", "Holders", "Yours", "Worth"]
 const SETUPS := [
 	["1 player vs 3 CPUs", [false, true, true, true]],
 	["2 players vs 2 CPUs", [false, false, true, true]],
@@ -37,6 +39,16 @@ var heap_panel: Control
 var heap_title: Label
 var heap_reveal: Label
 var heap_buttons: Array[Button] = []
+var market_panel: Control
+var market_title: Label
+var market_grid: GridContainer
+var market_total: Label
+var market_selected: Label
+var market_qty_label: Label
+var market_buy: Button
+var market_sell: Button
+var _market_block := ""
+var _market_qty := 5
 
 
 func _ready() -> void:
@@ -88,6 +100,7 @@ func _build_ui() -> void:
 	banner.add_theme_color_override("font_outline_color", Color.BLACK)
 	board_area.add_child(banner)
 	_build_heap(board_area)
+	_build_market(board_area)
 
 	var panel := PanelContainer.new()
 	panel.custom_minimum_size = Vector2(400, 0)
@@ -377,25 +390,185 @@ func _market(p: PlayerState, prompt: String) -> void:
 		Cpu.trade(game, p)
 		_refresh()
 		return
+	prompt_label.text = prompt
+	for c in buttons.get_children():
+		c.queue_free()
+	if _market_block == "" or not game.board.blocks.has(_market_block):
+		_market_block = game.board.blocks.keys()[0]
+	_market_qty = BOND_LOT
+	market_panel.visible = true
 	while true:
-		var choices := []
-		for block in game.board.blocks:
-			var price := game.bond_price(block)
-			var bname: String = game.board.blocks[block].name
-			if p.cash >= price * BOND_LOT:
-				choices.append(["Buy %d %s @ %d" % [BOND_LOT, bname, price], ["buy", block]])
-			if p.bonds_in(block) > 0:
-				var n := mini(BOND_LOT, p.bonds_in(block))
-				choices.append(["Sell %d %s @ %d" % [n, bname, price], ["sell", block, n]])
-		choices.append(["Done", null])
-		var pick = await _ask(p, prompt, choices)
-		if pick == null:
-			return
-		if pick[0] == "buy":
-			game.buy_bonds(p, pick[1], BOND_LOT)
-		else:
-			game.sell_bonds(p, pick[1], pick[2])
+		_fill_market(p)
+		var act: Array = await market_action
+		match act[0]:
+			"select":
+				_market_block = act[1]
+			"qty":
+				_market_qty = clampi(_market_qty + act[1], 1, GameState.MAX_BOND_TRADE)
+			"buy":
+				game.buy_bonds(p, _market_block, _market_qty)
+			"sell":
+				game.sell_bonds(p, _market_block, mini(_market_qty, p.bonds_in(_market_block)))
+			"done":
+				break
 		_refresh()
+	market_panel.visible = false
+
+
+## The Bond Market: a table of every block's bond price, its move this round,
+## who holds what, and buy/sell controls for the selected block.
+func _build_market(parent: Control) -> void:
+	var center := CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	center.visible = false
+	parent.add_child(center)
+	market_panel = center
+	var panel := PanelContainer.new()
+	var bg := StyleBoxFlat.new()
+	bg.bg_color = Color("#1c2a2a")
+	bg.border_color = Color("#2e8b80")
+	bg.set_border_width_all(3)
+	bg.set_corner_radius_all(10)
+	bg.set_content_margin_all(16)
+	panel.add_theme_stylebox_override("panel", bg)
+	center.add_child(panel)
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 10)
+	panel.add_child(col)
+
+	market_title = Label.new()
+	market_title.add_theme_font_size_override("font_size", 22)
+	col.add_child(market_title)
+	market_grid = GridContainer.new()
+	market_grid.columns = MARKET_HEADERS.size()
+	market_grid.add_theme_constant_override("h_separation", 16)
+	market_grid.add_theme_constant_override("v_separation", 4)
+	col.add_child(market_grid)
+	market_total = Label.new()
+	market_total.add_theme_color_override("font_color", Color("#bfe8e2"))
+	col.add_child(market_total)
+
+	var trade := HBoxContainer.new()
+	trade.add_theme_constant_override("separation", 6)
+	col.add_child(trade)
+	market_selected = Label.new()
+	market_selected.custom_minimum_size = Vector2(130, 0)
+	trade.add_child(market_selected)
+	for d in [-10, -1]:
+		trade.add_child(_market_button("%d" % d, ["qty", d]))
+	market_qty_label = Label.new()
+	market_qty_label.custom_minimum_size = Vector2(40, 0)
+	market_qty_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	market_qty_label.add_theme_font_size_override("font_size", 20)
+	trade.add_child(market_qty_label)
+	for d in [1, 10]:
+		trade.add_child(_market_button("+%d" % d, ["qty", d]))
+	market_buy = _market_button("Buy", ["buy"])
+	market_buy.custom_minimum_size = Vector2(120, 0)
+	trade.add_child(market_buy)
+	market_sell = _market_button("Sell", ["sell"])
+	market_sell.custom_minimum_size = Vector2(130, 0)
+	trade.add_child(market_sell)
+	trade.add_child(_market_button("Done", ["done"]))
+
+	var note := Label.new()
+	note.text = ("Each bond pays %d%% of every rent paid in its block. " +
+			"Trading %d or more at once moves the price %d%%.") % [
+			roundi(GameState.DIVIDEND_RATE * 100), GameState.BIG_BOND_TRADE,
+			roundi(GameState.BOND_PRESSURE * 100)]
+	note.add_theme_font_size_override("font_size", 13)
+	note.add_theme_color_override("font_color", Color("#8fb0ab"))
+	col.add_child(note)
+
+
+func _market_button(text: String, act: Array) -> Button:
+	var b := Button.new()
+	b.text = text
+	b.pressed.connect(func(): market_action.emit(act))
+	return b
+
+
+func _fill_market(p: PlayerState) -> void:
+	market_title.text = "Bond Market — %s  (cash %d)" % [p.name, p.cash]
+	for c in market_grid.get_children():
+		market_grid.remove_child(c)
+		c.queue_free()
+	for h in MARKET_HEADERS:
+		var l := Label.new()
+		l.text = h
+		l.add_theme_color_override("font_color", Color("#8fb0ab"))
+		market_grid.add_child(l)
+
+	var my_total := 0
+	for block in game.board.blocks:
+		var info: Dictionary = game.board.blocks[block]
+		var price := game.bond_price(block)
+		var change := game.bond_change(block)
+		var mine := p.bonds_in(block)
+		my_total += mine * price
+
+		var name_btn := Button.new()
+		name_btn.text = info.name
+		name_btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		name_btn.custom_minimum_size = Vector2(160, 0)
+		var swatch := StyleBoxFlat.new()
+		swatch.bg_color = info.color.darkened(0.15 if block == _market_block else 0.55)
+		swatch.set_corner_radius_all(4)
+		swatch.set_content_margin_all(5)
+		if block == _market_block:
+			swatch.set_border_width_all(2)
+			swatch.border_color = Color.WHITE
+		for state in ["normal", "hover", "pressed", "focus"]:
+			name_btn.add_theme_stylebox_override(state, swatch)
+		name_btn.pressed.connect(func(): market_action.emit(["select", block]))
+		market_grid.add_child(name_btn)
+
+		market_grid.add_child(_cell("%d" % price, Color.WHITE, 20))
+		if change > 0:
+			market_grid.add_child(_cell("▲ %d" % change, KIND_COLORS.gain))
+		elif change < 0:
+			market_grid.add_child(_cell("▼ %d" % -change, KIND_COLORS.loss))
+		else:
+			market_grid.add_child(_cell("–", KIND_COLORS.info))
+		market_grid.add_child(_cell("%d" % game.block_value(block), KIND_COLORS.info))
+
+		var holders := RichTextLabel.new()
+		holders.bbcode_enabled = true
+		holders.fit_content = true
+		holders.autowrap_mode = TextServer.AUTOWRAP_OFF
+		holders.custom_minimum_size = Vector2(150, 0)
+		var parts := PackedStringArray()
+		for q in game.players:
+			if q.bonds_in(block) > 0:
+				parts.append("[color=#%s]■[/color]%d" % [
+						BoardView.PLAYER_COLORS[q.index].to_html(false), q.bonds_in(block)])
+		holders.text = " ".join(parts) if not parts.is_empty() else "[color=#666666]none[/color]"
+		market_grid.add_child(holders)
+
+		market_grid.add_child(_cell("%d" % mine if mine > 0 else "–", Color.WHITE))
+		market_grid.add_child(_cell("%d" % (mine * price) if mine > 0 else "–", Color("#ffe48a")))
+
+	market_total.text = "Your bonds are worth %d in total." % my_total
+	var price := game.bond_price(_market_block)
+	var held := p.bonds_in(_market_block)
+	var sell_n := mini(_market_qty, held)
+	market_selected.text = game.board.blocks[_market_block].name
+	market_qty_label.text = "%d" % _market_qty
+	market_buy.text = "Buy for %d" % (price * _market_qty)
+	market_buy.disabled = p.cash < price * _market_qty
+	market_sell.text = "Sell %d for %d" % [sell_n, price * sell_n] if held > 0 else "Sell"
+	market_sell.disabled = held == 0
+
+
+func _cell(text: String, color: Color, size := 16) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.add_theme_color_override("font_color", color)
+	l.add_theme_font_size_override("font_size", size)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	return l
+
 
 
 ## Shows buttons and waits for a pick. CPU players (and only they) get

@@ -92,6 +92,9 @@ Landing on a rival's lot, after paying rent you may **buy it out** for
   minimum 5, recalculated whenever a lot's value changes.
 - You may buy or sell bonds on a **Market** space (landing or passing), or at
   the start of your turn when standing on the Depot. Up to 20 bonds per action.
+- The **Bond Market** screen lists every block with its bond price, the change
+  since the round began, the block's total value, each player's holdings and
+  what yours are worth; pick a block and an amount (1-20) to buy or sell.
 - **Dividends:** when rent is paid on any lot in a block, each bondholder of
   that block receives `rent × 1%` per bond held, paid by the bank.
 - **Pressure:** a single purchase of 10+ bonds raises that block's bond price
