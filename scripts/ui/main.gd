@@ -49,6 +49,9 @@ var _ticker_serial := 0
 var _last_bond := {}  # block id -> bond price at the last _refresh()
 var _last_tiers := {}  # lot id -> renovation tier at the last _refresh()
 var _keys := {}  # while planning a route: "ui_up"/... or "back" -> value to choose
+var _planning := false     # a human is planning a route
+var _confirming := false   # playing a confirmed route through the rules
+var _route_suits: Array = []  # suits the current player would hold at the route's end
 var ticker_panel: PanelContainer
 var ticker_grid: GridContainer
 var card_view: Control
@@ -291,6 +294,8 @@ func _move_and_land(p: PlayerState, prompt: String) -> void:
 func _plan_route(p: PlayerState) -> void:
 	var total := game.moves_left
 	var path: Array[int] = []
+	_planning = true
+	_route_suits = p.punches.duplicate()
 	board_view.zoom_for_highlight = false
 	while true:
 		var here: int = path[-1] if not path.is_empty() else p.position
@@ -301,6 +306,7 @@ func _plan_route(p: PlayerState) -> void:
 			prev = p.position
 		board_view.preview(p.index, here)
 		_show_space_info(here)
+		_update_route_suits(p, path)
 		if path.size() == total:
 			board_view.highlight = []
 			board_view.sync()
@@ -336,13 +342,40 @@ func _plan_route(p: PlayerState) -> void:
 	board_view.highlight = []
 	board_view.zoom_for_highlight = true
 	board_view.clear_preview(p.index)
+	_planning = false
+	_confirming = true  # suits already popped up while planning
 	for to in path:
 		game.step(to)
 		_refresh()
 		await _hold_for_shows()
 		if game.game_over:
+			_confirming = false
 			return
+	_confirming = false
 
+
+## Suits the player would hold after walking `path`, by the rules: each new
+## suit is collected, and passing the Depot with all of them is a PAYDAY that
+## resets them. Shows gains and losses as they happen.
+func _update_route_suits(p: PlayerState, path: Array[int]) -> void:
+	var suits: Array = p.punches.duplicate()
+	for id in path:
+		var s := game.space(id)
+		if s.type == "relay" and id not in suits:
+			suits.append(id)
+		elif s.type == "depot" and suits.size() >= game.board.relay_ids().size():
+			suits.clear()
+	for r in suits:
+		if r not in _route_suits:
+			var m: String = game.space(r).mark
+			board_view.popup_at_space(r, "%s %s!" % [BoardView.SUIT_SYMBOLS.get(m, ""), m.to_upper()],
+					game.space(r).color)
+	for r in _route_suits:
+		if r not in suits:
+			board_view.popup_at_space(r, "-%s" % BoardView.SUIT_SYMBOLS.get(game.space(r).mark, ""),
+					Color("#8a8a96"))
+	_route_suits = suits
+	_refresh()
 
 ## Which arrow (as a ui_* action) points from space `a` to space `b` on screen;
 ## the camera always looks the same way, so board up is screen up.
@@ -1032,9 +1065,10 @@ func _refresh() -> void:
 		var bonds := 0
 		for b in p.bonds:
 			bonds += p.bonds[b]
+		var held: Array = _route_suits if _planning and p.index == game.current else p.punches
 		var pips := ""
 		for r in game.board.relay_ids():
-			var rc: String = game.space(r).color.to_html(false) if r in p.punches else "4a4a55"
+			var rc: String = game.space(r).color.to_html(false) if r in held else "4a4a55"
 			pips += "[color=#%s]%s[/color]" % [rc, BoardView.SUIT_SYMBOLS.get(game.space(r).mark, "●")]
 		lines.append("%s[color=#%s]■[/color] [b]%s[/b] %s  S%d  net %d  bonds %d%s" % [
 				mark, col, p.name, pips, p.cash, game.net_worth(p), bonds,
@@ -1054,7 +1088,7 @@ func _refresh() -> void:
 			board_view.payday(e.player, e.get("amount", 0))
 			_last_cash[e.player] = game.players[e.player].cash  # the banner shows it
 			_payday_shown = true
-		if e.kind == "relay":
+		if e.kind == "relay" and not _confirming:
 			var m: String = game.space(e.space).mark
 			board_view.popup_at_space(e.space, "%s %s!" % [BoardView.SUIT_SYMBOLS.get(m, ""), m.to_upper()], color)
 		_shown_events += 1

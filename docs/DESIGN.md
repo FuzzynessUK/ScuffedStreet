@@ -31,6 +31,9 @@ salary) are used freely; specific mechanics are not copied from any game.
   picks a branch. You may never step back onto the space you just came from,
   but while planning you can press **Back** to undo steps. After the last
   step the game asks **"Go here?"**; only a confirmed route counts.
+- Suits are collected live while planning (pip and popup); stepping back off
+  a suit collected on this route takes it away again. Suits held before the
+  move are kept.
 - Keyboard: the arrow keys (or d-pad) step in that direction on screen; the
   arrow back the way you came, Backspace or Escape undo a step; Enter or
   Space confirms "Go here?" (or takes the only way forward).
