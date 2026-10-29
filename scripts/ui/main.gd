@@ -6,7 +6,7 @@ signal chosen(value)
 signal heap_picked(slot: int)
 
 const BOARD_PATH := "res://boards/scrapyard_loop.json"
-const STEP_DELAY := 0.15
+const STEP_DELAY := 0.32
 const CPU_DELAY := 0.6
 const BOND_LOT := 5  # bonds per market button press
 const HEAP_COLUMNS := 5
@@ -434,7 +434,7 @@ func _refresh() -> void:
 		var pips := ""
 		for r in game.board.relay_ids():
 			var rc: String = game.space(r).color.to_html(false) if r in p.punches else "4a4a55"
-			pips += "[color=#%s]●[/color]" % rc
+			pips += "[color=#%s]%s[/color]" % [rc, BoardView.SUIT_SYMBOLS.get(game.space(r).mark, "●")]
 		lines.append("%s[color=#%s]■[/color] [b]%s[/b] %s  S%d  net %d  bonds %d%s" % [
 				mark, col, p.name, pips, p.cash, game.net_worth(p), bonds,
 				"  BROKE" if p.broke else ""])
@@ -450,7 +450,8 @@ func _refresh() -> void:
 			banner.text = e.text
 			banner.add_theme_color_override("font_color", color)
 		if e.kind == "relay":
-			board_view.popup_at_space(e.space, game.space(e.space).mark.to_upper() + "!", color)
+			var m: String = game.space(e.space).mark
+			board_view.popup_at_space(e.space, "%s %s!" % [BoardView.SUIT_SYMBOLS.get(m, ""), m.to_upper()], color)
 		_shown_events += 1
 
 	for p in game.players:

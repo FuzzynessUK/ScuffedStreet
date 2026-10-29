@@ -1,14 +1,20 @@
 class_name BoardView
 extends Node3D
-## Basic 3D board built from placeholder meshes: box tiles, block buildings that
-## grow with renovation tier, beacons on Relays, capsule tokens and floating
-## text popups. Call build() for a new game and sync() after every change.
+## Basic 3D board built from placeholder meshes: box tiles, a building on each
+## lot sized by its value with a signpost showing the price (or rent once owned),
+## suit beacons on the Relays, walking figures and floating text popups. Call build() for a new game and sync() after every change.
 
 const SPACING := 1.15
 const TILE := 1.0
 const TILE_H := 0.16
-const MOVE_TIME := 0.15
-const BUILDING_H := [0.22, 0.45, 0.75, 1.15]  # by renovation tier
+const MOVE_TIME := 0.3
+const VALUE_FOR_FULL_SIZE := 2000.0  # lot value whose building reaches full size
+const BUILDING_MIN_H := 0.06
+const BUILDING_MAX_H := 1.0
+const UNOWNED_BUILDING := Color("#d8d8de")
+const FIGURE_SCALE := 1.35
+const SIGN_HEIGHT := 0.32
+const SUIT_HEIGHT := 0.65
 const UNOWNED_DIM := 0.6
 const TYPE_COLORS := {
 	"depot": Color("#f2f2f2"), "market": Color("#2e8b80"), "wildcard": Color("#f29bd0"),
@@ -20,6 +26,7 @@ const TYPE_LABELS := {
 	"toll": "TOLL", "jackpot": "POT", "detour": "DETOUR", "junction": "",
 }
 const PLAYER_COLORS := [Color("#e84a4a"), Color("#4a7fe8"), Color("#48b860"), Color("#e8a02a")]
+const SUIT_SYMBOLS := {"Spade": "♠", "Heart": "♥", "Diamond": "♦", "Club": "♣"}
 
 var game: GameState
 var highlight: Array[int] = []  # spaces offered as a branch choice
@@ -32,6 +39,7 @@ var _token_space: Array[int] = []
 var _ring: MeshInstance3D
 var _arrows: Array[Node3D] = []
 var _popups: Array[Label3D] = []
+var _spinners: Array[Node3D] = []  # suit symbols swaying above the Relays
 var _time := 0.0
 
 
@@ -66,6 +74,7 @@ func build(g: GameState) -> void:
 	_tokens.clear()
 	_token_space.clear()
 	_arrows.clear()
+	_spinners.clear()
 	highlight = []
 	if g == null:
 		return
@@ -86,17 +95,11 @@ func build(g: GameState) -> void:
 		_add_space(s)
 
 	for p in g.players:
-		var holder := Node3D.new()
-		var body := MeshInstance3D.new()
-		var capsule := CapsuleMesh.new()
-		capsule.radius = 0.11
-		capsule.height = 0.42
-		body.mesh = capsule
-		body.material_override = _material(PLAYER_COLORS[p.index])
-		body.position.y = 0.21
-		holder.add_child(body)
-		_root.add_child(holder)
-		_tokens.append(holder)
+		var figure := Character.new()
+		_root.add_child(figure)
+		figure.setup(PLAYER_COLORS[p.index])
+		figure.scale = Vector3.ONE * FIGURE_SCALE
+		_tokens.append(figure)
 		_token_space.append(-1)
 
 	_ring = MeshInstance3D.new()
@@ -119,19 +122,28 @@ func sync(instant := false) -> void:
 		var t: Dictionary = _tiles[id]
 		var lot: Dictionary = game.lots[id]
 		var mat: StandardMaterial3D = t.mesh.material_override
+		# The building's size follows the lot's value; the sign shows the price
+		# while it is for sale and the rent once owned, in the owner's colour.
 		var building: MeshInstance3D = t.building
+		var size := sqrt(game.lot_value(id) / VALUE_FOR_FULL_SIZE)
+		var h := BUILDING_MIN_H + BUILDING_MAX_H * size
+		var w := 0.2 + 0.3 * minf(size, 1.0)
+		building.scale = Vector3(w, h, w * 0.85)
+		building.position.y = TILE_H + h / 2
+		var sign_mat: StandardMaterial3D = t.sign_board.material_override
+		var bmat: StandardMaterial3D = building.material_override
 		if lot.owner < 0:
 			mat.albedo_color = t.base.darkened(UNOWNED_DIM)
-			building.visible = false
-			t.sub.text = "S %d" % game.lot_value(id)
+			bmat.albedo_color = UNOWNED_BUILDING.lerp(t.base, 0.25)
+			sign_mat.albedo_color = Color("#f4f1e6")
+			t.sign_label.modulate = Color("#202020")
+			t.sign_label.text = "%d" % game.lot_value(id)
 		else:
 			mat.albedo_color = t.base
-			var h: float = BUILDING_H[lot.tier]
-			building.visible = true
-			building.scale = Vector3(1, h, 1)
-			building.position.y = TILE_H + h / 2
-			(building.material_override as StandardMaterial3D).albedo_color = PLAYER_COLORS[lot.owner]
-			t.sub.text = "%s  %d" % [GameState.TIER_NAMES[lot.tier], game.rent(id)]
+			bmat.albedo_color = PLAYER_COLORS[lot.owner]
+			sign_mat.albedo_color = PLAYER_COLORS[lot.owner]
+			t.sign_label.modulate = Color.WHITE
+			t.sign_label.text = "%d" % game.rent(id)
 
 	for id in _tiles:
 		var mat: StandardMaterial3D = _tiles[id].mesh.material_override
@@ -156,13 +168,13 @@ func sync(instant := false) -> void:
 		_token_space[p.index] = p.position
 		if instant:
 			holder.position = target
+			holder.rotation.y = 0.0  # face the camera
 		else:
-			create_tween().tween_property(holder, "position", target, MOVE_TIME) \
-					.set_trans(Tween.TRANS_SINE)
+			(holder as Character).walk_to(target, MOVE_TIME)
 
 
 func popup_at_player(index: int, text: String, color: Color) -> void:
-	_popup(_tokens[index].position + Vector3(0, 0.6, 0), text, color)
+	_popup(_tokens[index].position + Vector3(0, 0.75, 0), text, color)
 
 
 func popup_at_space(id: int, text: String, color: Color) -> void:
@@ -173,9 +185,11 @@ func _process(delta: float) -> void:
 	_time += delta
 	if game == null or _tokens.is_empty():
 		return
-	var cur := _tokens[game.current]
-	cur.get_child(0).position.y = 0.21 + absf(sin(_time * 5.0)) * 0.12
-	_ring.position = cur.position + Vector3(0, 0.03, 0)
+	_ring.position = _tokens[game.current].position + Vector3(0, 0.03, 0)
+	for i in _spinners.size():
+		var s := _spinners[i]
+		s.rotation.y = sin(_time * 1.2 + i) * 0.45
+		s.position.y = SUIT_HEIGHT + sin(_time * 2.0 + i) * 0.05
 	for a in _arrows:
 		a.position.y = 1.0 + sin(_time * 6.0) * 0.08
 
@@ -191,31 +205,38 @@ func _add_space(s: Dictionary) -> void:
 	var tile := _box(Vector3(TILE, TILE_H, TILE), base)
 	tile.position = _pos(s.id) + Vector3(0, TILE_H / 2, 0)
 	_root.add_child(tile)
-	var entry := {"mesh": tile, "base": base, "sub": null, "building": null}
+	var entry := {"mesh": tile, "base": base}
 
 	var title: String = TYPE_LABELS.get(s.type, "")
 	match s.type:
 		"lot":
-			title = s.name
-			var building := _box(Vector3(0.46, 1.0, 0.4), Color.WHITE)
-			building.position = _pos(s.id) + Vector3(0, 0, -0.22)
-			building.visible = false
+			title = ""
+			var building := _box(Vector3.ONE, Color.WHITE)
+			building.position = _pos(s.id) + Vector3(0, 0, -0.12)
 			_root.add_child(building)
 			entry.building = building
+			var post := _box(Vector3(0.03, SIGN_HEIGHT, 0.03), Color("#7a5a3a"))
+			post.position = _pos(s.id) + Vector3(0, TILE_H + SIGN_HEIGHT / 2, 0.34)
+			_root.add_child(post)
+			var board := _box(Vector3(0.56, 0.24, 0.03), Color.WHITE)
+			board.position = _pos(s.id) + Vector3(0, TILE_H + SIGN_HEIGHT, 0.34)
+			board.rotation_degrees.x = -35  # tilted back towards the camera
+			_root.add_child(board)
+			entry.sign_board = board
+			var amount := _label("", 64, Color.BLACK)
+			amount.rotation_degrees.x = -35
+			amount.outline_size = 0
+			amount.pixel_size = 0.0035
+			amount.position = board.position + board.basis.z * 0.02
+			_root.add_child(amount)
+			entry.sign_label = amount
 		"relay":
-			title = s.mark.to_upper()
-			var beacon := MeshInstance3D.new()
-			var cyl := CylinderMesh.new()
-			cyl.top_radius = 0.12
-			cyl.bottom_radius = 0.16
-			cyl.height = 0.55
-			beacon.mesh = cyl
-			beacon.material_override = _material(s.color, 0.6)
-			beacon.position = _pos(s.id) + Vector3(0, TILE_H + 0.275, -0.2)
-			_root.add_child(beacon)
-			var badge := _label(s.mark.to_upper(), 56, s.color, true)
-			badge.position = _pos(s.id) + Vector3(0, 0.95, -0.2)
-			_root.add_child(badge)
+			title = "%s %s" % [SUIT_SYMBOLS.get(s.mark, ""), s.mark.to_upper()]
+			var suit := _suit(s.mark, s.color)
+			suit.scale = Vector3.ONE * 2.6
+			suit.position = _pos(s.id) + Vector3(0, SUIT_HEIGHT, -0.15)
+			_root.add_child(suit)
+			_spinners.append(suit)
 		"jackpot":
 			var coin := MeshInstance3D.new()
 			var cyl := CylinderMesh.new()
@@ -235,15 +256,71 @@ func _add_space(s: Dictionary) -> void:
 			cloth.position = _pos(s.id) + Vector3(-0.12, TILE_H + 0.7, -0.3)
 			_root.add_child(cloth)
 
-	var label := _label(title, 48 if s.type == "wildcard" else 30, Color.WHITE)
-	label.position = _pos(s.id) + Vector3(0, TILE_H + 0.01, 0.12)
-	_root.add_child(label)
-	if s.type == "lot":
-		var sub := _label("", 26, Color("#fff3b0"))
-		sub.position = _pos(s.id) + Vector3(0, TILE_H + 0.01, 0.36)
-		_root.add_child(sub)
-		entry.sub = sub
+	if title != "":
+		var label := _label(title, 48 if s.type == "wildcard" else 30, Color.WHITE)
+		label.position = _pos(s.id) + Vector3(0, TILE_H + 0.01, 0.12)
+		_root.add_child(label)
 	_tiles[s.id] = entry
+
+
+## A suit symbol modelled from primitives, standing upright (it sways in _process).
+func _suit(mark: String, color: Color) -> Node3D:
+	var root := Node3D.new()
+	var shape := Node3D.new()
+	shape.scale = Vector3(1, 1, 0.35)  # flatten into a thick badge
+	root.add_child(shape)
+	var m := _material(color, 0.5)
+	match mark:
+		"Diamond":
+			var d := _shape_part(BoxMesh.new(), m, Vector3.ZERO, 0.16)
+			d.rotation_degrees.z = 45
+			shape.add_child(d)
+			shape.scale.y = 1.35
+		"Heart", "Spade":
+			var lobes := Node3D.new()
+			lobes.add_child(_shape_part(SphereMesh.new(), m, Vector3(-0.055, 0.035, 0), 0.13))
+			lobes.add_child(_shape_part(SphereMesh.new(), m, Vector3(0.055, 0.035, 0), 0.13))
+			var point := _shape_part(BoxMesh.new(), m, Vector3(0, -0.035, 0), 0.13)
+			point.rotation_degrees.z = 45
+			lobes.add_child(point)
+			if mark == "Spade":
+				lobes.rotation_degrees.z = 180
+				lobes.position.y = 0.03
+				shape.add_child(_stem(m))
+			shape.add_child(lobes)
+		"Club":
+			shape.add_child(_shape_part(SphereMesh.new(), m, Vector3(0, 0.07, 0), 0.12))
+			shape.add_child(_shape_part(SphereMesh.new(), m, Vector3(-0.065, -0.02, 0), 0.12))
+			shape.add_child(_shape_part(SphereMesh.new(), m, Vector3(0.065, -0.02, 0), 0.12))
+			shape.add_child(_stem(m))
+		_:
+			shape.add_child(_shape_part(SphereMesh.new(), m, Vector3.ZERO, 0.16))
+	return root
+
+
+func _stem(m: Material) -> MeshInstance3D:
+	var stem := MeshInstance3D.new()
+	var cyl := CylinderMesh.new()
+	cyl.top_radius = 0.012
+	cyl.bottom_radius = 0.04
+	cyl.height = 0.12
+	stem.mesh = cyl
+	stem.material_override = m
+	stem.position.y = -0.09
+	return stem
+
+
+## A primitive of `size` (diameter, or edge for boxes) at `at`.
+func _shape_part(mesh: PrimitiveMesh, m: Material, at: Vector3, size: float) -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	mi.mesh = mesh
+	mi.material_override = m
+	mi.position = at
+	mi.scale = Vector3.ONE * size
+	if mesh is SphereMesh:
+		mesh.radius = 0.5
+		mesh.height = 1.0
+	return mi
 
 
 func _add_link(a: Vector3, b: Vector3) -> void:
@@ -308,7 +385,7 @@ func _pos(id: int) -> Vector3:
 ## Where a token stands on its space; up to four share a tile, one per corner.
 func _token_spot(index: int) -> Vector3:
 	var p := game.players[index]
-	var off := Vector3(-0.27 if index % 2 == 0 else 0.27, TILE_H, -0.27 if index < 2 else 0.27)
+	var off := Vector3(-0.3 if index % 2 == 0 else 0.3, TILE_H, -0.3 if index < 2 else 0.3)
 	return _pos(p.position) + off
 
 

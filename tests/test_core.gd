@@ -43,7 +43,7 @@ func test_board_loads() -> void:
 	check(b.spaces.size() == 33, "33 spaces")
 	check(b.depot == 0, "depot is space 0")
 	check(b.relay_ids().size() == 4, "four relays")
-	check(b.spaces[9].mark == "Bolt", "relay mark loaded")
+	check(b.spaces[9].mark == "Heart", "relay suit loaded")
 	check(b.lots_in_block("F").size() == 4, "block F has four lots")
 
 

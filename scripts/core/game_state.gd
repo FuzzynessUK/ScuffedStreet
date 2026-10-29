@@ -211,7 +211,7 @@ func _pass(p: PlayerState, id: int) -> void:
 		"relay":
 			if id not in p.punches:
 				p.punches.append(id)
-				_note("%s punches %s" % [p.name, _label(id)], "relay", p.index, id)
+				_note("%s collects the %s" % [p.name, _label(id)], "relay", p.index, id)
 
 
 ## Resolves the space the current player stopped on. Automatic effects happen

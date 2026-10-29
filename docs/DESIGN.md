@@ -34,9 +34,10 @@ salary) are used freely; specific mechanics are not copied from any game.
 
 ## Laps: Relays and salary
 
-- Each board has **4 Relay** spaces, each with its own colour and symbol (Gear,
-  Bolt, Wrench, Cog on Scrapyard Loop), shown on the space and as pips on the
-  player panel. Passing or landing on a Relay you have not
+- Each board has **4 Relay** spaces, one per card suit: Spade, Heart, Diamond
+  and Club, each with its own colour, shown as a suit beacon on the space and
+  as suit pips on the player panel. (The suits are only the markers; the
+  salary rule below is ours: no full set or promotion is required.) Passing or landing on a Relay you have not
   visited this lap gives you its **punch** (each Relay counts once per lap).
 - Passing or landing on the **Depot** pays salary and resets your punches:
 

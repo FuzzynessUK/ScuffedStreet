@@ -23,7 +23,7 @@ Each space:
 | `block` | `lot`        | Block id. |
 | `price` | `lot`        | Base price. |
 | `pair`  | `detour`     | Id of the Detour space this one warps to. |
-| `mark`  | `relay`      | Short symbol name shown on the space and the player panel (e.g. `Gear`). |
+| `mark`  | `relay`      | The suit: `Spade`, `Heart`, `Diamond` or `Club`. |
 | `color` | `relay`      | The relay's colour, `#rrggbb`. Each relay should have a distinct one. |
 | `name`  | optional     | Display name. |
 
