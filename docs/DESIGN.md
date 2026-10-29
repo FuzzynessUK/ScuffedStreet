@@ -117,11 +117,18 @@ Landing on a rival's lot, after paying rent you may **buy it out** for
 
 ## Wildcards and the Scrap Heap
 
-Landing on a Wildcard space opens the **Scrap Heap**: a 5×4 grid of face-down
-cards holding one of each of the 20 Wildcards in random order. The player picks
-a card, it turns over and takes effect, and that slot stays empty. When every
-card has been taken the heap is reshuffled and refilled. Cards are kept by id
+Landing on a Wildcard space opens the **Scrap Heap**: an 8×8 grid of face-down
+cards. Every one of the 20 Wildcards is in it at least once; the other slots
+are random repeats. The player picks a card, it turns over and takes effect,
+and the slot stays face up in that player's colour. When every slot has been
+taken the heap is reshuffled and the colours clear. Cards are kept by id
 (`scripts/core/wildcards.gd`) so a card can later launch a minigame.
+
+**Patches:** your taken cards that touch up, down, left or right form a patch.
+Taking a card pays `40 × (patch size − 1)` from the bank, so joining one of
+your cards pays 40, a patch of 3 pays 80, a patch of 5 pays 160. Rivals'
+cards don't count and block your patch from growing through them. Free slots
+show what they would pay you.
 
 Cards that need a choice (a lot, a block, a swap) do nothing if there is no
 valid choice. Only Swap Meet may be declined.

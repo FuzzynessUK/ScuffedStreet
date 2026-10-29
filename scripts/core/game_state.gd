@@ -22,6 +22,9 @@ const MIN_BOND_PRICE := 5
 const MAX_BOND_TRADE := 20
 const BIG_BOND_TRADE := 10
 const BOND_PRESSURE := 0.10
+const HEAP_COLS := 8
+const HEAP_ROWS := 8
+const PATCH_BONUS := 40  # per card in the patch beyond the first
 
 var board: Board
 var players: Array[PlayerState] = []
@@ -36,7 +39,8 @@ var winner := -1
 var game_over := false
 var events: Array[Dictionary] = []
 var rng := RandomNumberGenerator.new()
-var heap: Array[int] = []  # Scrap Heap: a Wildcard id per slot, -1 once taken
+var heap: Array[int] = []        # Scrap Heap: the Wildcard id in each slot
+var heap_owner: Array[int] = []  # who took each slot, -1 while face down
 
 
 func setup(p_board: Board, names: Array, cpu: Array = [], seed := -1) -> void:
@@ -430,26 +434,41 @@ func _new_lot() -> Dictionary:
 
 
 # --- Scrap Heap -----------------------------------------------------------
+# A HEAP_COLS x HEAP_ROWS grid of face-down Wildcards: every card at least
+# once, the rest random repeats. A taken slot keeps its card and records who
+# took it; joining your own earlier cards (up/down/left/right) pays a patch
+# bonus. The heap reshuffles once every slot is taken.
 
 func _refill_heap() -> void:
-	heap.clear()
+	var deck: Array[int] = []
 	for i in Wildcards.CARDS.size():
-		heap.append(i)
-	for i in range(heap.size() - 1, 0, -1):
+		deck.append(i)
+	while deck.size() < HEAP_COLS * HEAP_ROWS:
+		deck.append(rng.randi_range(0, Wildcards.CARDS.size() - 1))
+	for i in range(deck.size() - 1, 0, -1):
 		var j := rng.randi_range(0, i)
-		var t := heap[i]
-		heap[i] = heap[j]
-		heap[j] = t
+		var t := deck[i]
+		deck[i] = deck[j]
+		deck[j] = t
+	heap = deck
+	heap_owner.clear()
+	heap_owner.resize(deck.size())
+	heap_owner.fill(-1)
 
 
-## Takes the card in `slot`; the heap refills once every card has been taken.
+## The current player takes the card in `slot`, earning any patch bonus.
 func take_from_heap(slot: int) -> int:
+	assert(heap_owner[slot] < 0, "slot already taken")
+	var p := current_player()
 	var id := heap[slot]
-	assert(id >= 0, "slot already taken")
-	heap[slot] = -1
-	_note("%s turns over card %d of the Scrap Heap" % [current_player().name, slot + 1],
-			"info", current)
-	if heap.all(func(c): return c < 0):
+	heap_owner[slot] = p.index
+	_note("%s turns over a card in the Scrap Heap" % p.name, "info", current)
+	var bonus := patch_bonus(patch_size(slot, p.index))
+	if bonus > 0:
+		p.cash += bonus
+		_note("%s's patch of %d cards pays %d" % [p.name, patch_size(slot, p.index), bonus],
+				"gain", p.index)
+	if heap_slots_left().is_empty():
 		_refill_heap()
 		_note("The Scrap Heap is reshuffled", "info")
 	return id
@@ -457,9 +476,42 @@ func take_from_heap(slot: int) -> int:
 
 func heap_slots_left() -> Array[int]:
 	var out: Array[int] = []
-	for i in heap.size():
-		if heap[i] >= 0:
+	for i in heap_owner.size():
+		if heap_owner[i] < 0:
 			out.append(i)
+	return out
+
+
+func patch_bonus(size: int) -> int:
+	return PATCH_BONUS * maxi(0, size - 1)
+
+
+## Size of the patch `slot` belongs to (or would join) for `owner`: the slot
+## plus every card of theirs connected to it up, down, left or right.
+func patch_size(slot: int, owner: int) -> int:
+	var seen := {slot: true}
+	var stack: Array[int] = [slot]
+	while not stack.is_empty():
+		var s: int = stack.pop_back()
+		for n in heap_neighbours(s):
+			if not seen.has(n) and heap_owner[n] == owner:
+				seen[n] = true
+				stack.append(n)
+	return seen.size()
+
+
+func heap_neighbours(slot: int) -> Array[int]:
+	var out: Array[int] = []
+	var x := slot % HEAP_COLS
+	var y := slot / HEAP_COLS
+	if x > 0:
+		out.append(slot - 1)
+	if x < HEAP_COLS - 1:
+		out.append(slot + 1)
+	if y > 0:
+		out.append(slot - HEAP_COLS)
+	if y < HEAP_ROWS - 1:
+		out.append(slot + HEAP_COLS)
 	return out
 
 

@@ -168,12 +168,35 @@ func test_wildcards() -> void:
 	var g := new_game()
 	var p := g.players[0]
 	var q := g.players[1]
-	check(g.heap.size() == 20 and g.heap_slots_left().size() == 20, "heap starts full")
+	var slots := GameState.HEAP_COLS * GameState.HEAP_ROWS
+	check(g.heap.size() == slots and g.heap_slots_left().size() == slots, "heap starts full")
 	var seen := {}
-	for i in 20:
-		seen[g.take_from_heap(g.heap_slots_left()[0])] = true
-	check(seen.size() == 20, "heap holds every card once")
-	check(g.heap_slots_left().size() == 20, "heap refills when empty")
+	for id in g.heap:
+		seen[id] = true
+	check(seen.size() == Wildcards.CARDS.size(), "heap holds every card at least once")
+
+	# Patches: player 0 takes slot 0 then 1 (neighbours), then 9 (below 1).
+	var cash := p.cash
+	g.take_from_heap(0)
+	check(p.cash == cash, "a lone card pays nothing")
+	g.take_from_heap(1)
+	check(p.cash == cash + GameState.PATCH_BONUS, "patch of 2 pays one bonus")
+	g.take_from_heap(GameState.HEAP_COLS + 1)
+	check(p.cash == cash + GameState.PATCH_BONUS * 3, "patch of 3 pays two more")
+	check(g.heap_owner[1] == 0, "slot remembers its taker")
+	check(g.patch_size(GameState.HEAP_COLS + 2, 1) == 1, "another player's cards don't count")
+	g.current = 1
+	cash = q.cash
+	g.take_from_heap(2)
+	check(q.cash == cash, "touching a rival's patch pays nothing")
+	g.current = 0
+	while not g.heap_slots_left().is_empty() and g.heap_slots_left().size() < slots:
+		g.take_from_heap(g.heap_slots_left()[0])
+	check(g.heap_slots_left().size() == slots and g.heap_owner.all(func(o): return o < 0),
+			"heap refills and clears colours when empty")
+	p.cash = 1500
+	q.cash = 1500
+
 
 	g.buy_lot(q, 5)
 	Wildcards.apply(g, p, 5, 5)  # Power Cut

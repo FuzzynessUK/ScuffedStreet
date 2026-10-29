@@ -76,8 +76,7 @@ func land(g: GameState, p: PlayerState) -> void:
 			"market":
 				Cpu.trade(g, p)
 			"wildcard":
-				var left := g.heap_slots_left()
-				var id := g.take_from_heap(left[g.rng.randi() % left.size()])
+				var id := g.take_from_heap(Cpu.pick_heap_slot(g, p))
 				cards_drawn[id] += 1
 				var result := Wildcards.apply(g, p, id, Wildcards.cpu_pick(g, p, id))
 				if g.game_over:

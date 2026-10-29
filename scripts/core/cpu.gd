@@ -82,3 +82,17 @@ static func trade(g: GameState, p: PlayerState) -> void:
 	var count := mini(GameState.MAX_BOND_TRADE, (p.cash - res * 2) / price)
 	if count >= 1:
 		g.buy_bonds(p, best_block, count)
+
+
+## Scrap Heap slot: the one that makes its biggest patch (random among ties).
+static func pick_heap_slot(g: GameState, p: PlayerState) -> int:
+	var best: Array[int] = []
+	var best_size := 0
+	for s in g.heap_slots_left():
+		var size := g.patch_size(s, p.index)
+		if size > best_size:
+			best_size = size
+			best = [s]
+		elif size == best_size:
+			best.append(s)
+	return best[g.rng.randi() % best.size()]

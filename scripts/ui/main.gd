@@ -10,7 +10,6 @@ const BOARD_PATH := "res://boards/scrapyard_loop.json"
 const STEP_DELAY := 0.32
 const CPU_DELAY := 0.6
 const BOND_LOT := 5  # bonds per market button press
-const HEAP_COLUMNS := 5
 const HEAP_BACK := Color("#f29bd0")  # card backs: the Wildcard space colour
 const MARKET_HEADERS := ["Block", "Price", "This round", "Block value", "Holders", "Yours", "Worth"]
 const SETUPS := [
@@ -38,6 +37,7 @@ var _last_cash: Array[int] = []
 var heap_panel: Control
 var heap_title: Label
 var heap_reveal: Label
+var heap_hint: Label
 var heap_buttons: Array[Button] = []
 var market_panel: Control
 var market_title: Label
@@ -150,17 +150,20 @@ func _build_heap(parent: Control) -> void:
 	heap_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	heap_title.add_theme_font_size_override("font_size", 20)
 	col.add_child(heap_title)
+	heap_hint = Label.new()
+	heap_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	heap_hint.add_theme_font_size_override("font_size", 13)
+	heap_hint.add_theme_color_override("font_color", Color("#c9a6bd"))
+	col.add_child(heap_hint)
 	var grid := GridContainer.new()
-	grid.columns = HEAP_COLUMNS
-	grid.add_theme_constant_override("h_separation", 8)
-	grid.add_theme_constant_override("v_separation", 8)
+	grid.columns = GameState.HEAP_COLS
+	grid.add_theme_constant_override("h_separation", 5)
+	grid.add_theme_constant_override("v_separation", 5)
 	col.add_child(grid)
-	for i in Wildcards.CARDS.size():
+	for i in GameState.HEAP_COLS * GameState.HEAP_ROWS:
 		var b := Button.new()
-		b.custom_minimum_size = Vector2(96, 72)
-		b.add_theme_font_size_override("font_size", 15)
-		for c in ["font_color", "font_hover_color", "font_pressed_color", "font_disabled_color"]:
-			b.add_theme_color_override(c, Color("#3a1030"))
+		b.custom_minimum_size = Vector2(84, 50)
+		b.add_theme_font_size_override("font_size", 13)
 		b.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		b.pressed.connect(func(): heap_picked.emit(i))
 		grid.add_child(b)
@@ -311,7 +314,7 @@ func _wildcard(p: PlayerState) -> void:
 	var id := game.take_from_heap(slot)
 	var c := Wildcards.card(id)
 	heap_buttons[slot].text = c.name
-	_style_card(heap_buttons[slot], "face")
+	_style_card(heap_buttons[slot], "face", BoardView.PLAYER_COLORS[p.index])
 	heap_reveal.text = "%s\n%s" % [c.name.to_upper(), c.text]
 	await _ask(p, "%s drew %s." % [p.name, c.name], [["OK", true]], true)
 	heap_panel.visible = false
@@ -332,22 +335,31 @@ func _wildcard(p: PlayerState) -> void:
 func _pick_from_heap(p: PlayerState) -> int:
 	heap_panel.visible = true
 	heap_title.text = "%s: pick a card from the Scrap Heap" % p.name
+	heap_hint.text = "Cards next to your own (up, down, left, right) pay %d for each card in the patch after the first." % GameState.PATCH_BONUS
 	heap_reveal.text = ""
 	for i in heap_buttons.size():
 		var b := heap_buttons[i]
-		var left := game.heap[i] >= 0
-		b.text = "?" if left else ""
-		b.disabled = not left or p.is_cpu
-		_style_card(b, "back" if left else "taken")
+		var owner := game.heap_owner[i]
+		b.disabled = owner >= 0 or p.is_cpu
+		b.tooltip_text = ""
+		if owner >= 0:
+			b.text = Wildcards.card(game.heap[i]).name
+			_style_card(b, "owned", BoardView.PLAYER_COLORS[owner])
+		else:
+			b.text = "?"
+			_style_card(b, "back")
+			var bonus := game.patch_bonus(game.patch_size(i, p.index))
+			if bonus > 0:
+				b.text = "?
++%d" % bonus
 	prompt_label.text = "Pick a card." if not p.is_cpu else "%s is picking a card..." % p.name
 	for c in buttons.get_children():
 		c.queue_free()
 	var slot: int
 	if p.is_cpu:
 		await _wait(CPU_DELAY)
-		var left := game.heap_slots_left()
-		slot = left[randi() % left.size()]
-		_style_card(heap_buttons[slot], "face")
+		slot = Cpu.pick_heap_slot(game, p)
+		_style_card(heap_buttons[slot], "face", BoardView.PLAYER_COLORS[p.index])
 		await _wait(CPU_DELAY)
 	else:
 		slot = await heap_picked
@@ -647,14 +659,17 @@ func _event_color(e: Dictionary) -> Color:
 	return KIND_COLORS.get(e.kind, KIND_COLORS.info)
 
 
-## Card looks: "back" (face down, pink), "face" (turned over, white), "taken" (gone).
-func _style_card(b: Button, look: String) -> void:
-	var fill: Color = {"back": HEAP_BACK, "face": Color("#fff8fc"), "taken": Color(1, 1, 1, 0.06)}[look]
+## Card looks: "back" (face down, pink), "face" (just turned over: white with
+## the taker's colour round it) and "owned" (taken earlier: the taker's colour).
+func _style_card(b: Button, look: String, player_color := HEAP_BACK) -> void:
+	var fill: Color = {"back": HEAP_BACK, "face": Color("#fff8fc"), "owned": player_color.darkened(0.15)}[look]
+	var text := Color.WHITE if look == "owned" else Color("#3a1030")
+	for c in ["font_color", "font_hover_color", "font_pressed_color", "font_disabled_color"]:
+		b.add_theme_color_override(c, text)
 	for state in ["normal", "hover", "pressed", "disabled", "focus"]:
 		var box := StyleBoxFlat.new()
 		box.bg_color = fill.lightened(0.15) if state == "hover" and look == "back" else fill
 		box.set_corner_radius_all(8)
-		if look != "taken":
-			box.set_border_width_all(2)
-			box.border_color = Color("#3a1030") if look == "back" else HEAP_BACK
+		box.set_border_width_all(2 if look != "face" else 4)
+		box.border_color = {"back": Color("#3a1030"), "face": player_color, "owned": player_color.darkened(0.5)}[look]
 		b.add_theme_stylebox_override(state, box)
