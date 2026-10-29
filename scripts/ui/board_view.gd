@@ -15,6 +15,8 @@ const UNOWNED_BUILDING := Color("#d8d8de")
 const FIGURE_SCALE := 1.35
 const SIGN_HEIGHT := 0.32
 const SUIT_HEIGHT := 0.65
+const FIREWORKS := 6
+const FIREWORK_COLORS := [Color("#ff4a5a"), Color("#ffd84a"), Color("#4ae0ff"), Color("#7dff6a"), Color("#ff7ae8"), Color("#ffffff")]
 const UNOWNED_DIM := 0.6
 const TYPE_COLORS := {
 	"depot": Color("#f2f2f2"), "market": Color("#2e8b80"), "wildcard": Color("#f29bd0"),
@@ -41,6 +43,7 @@ var _arrows: Array[Node3D] = []
 var _popups: Array[Label3D] = []
 var _spinners: Array[Node3D] = []  # suit symbols swaying above the Relays
 var _time := 0.0
+var _center := Vector3.ZERO  # middle of the board
 
 
 func _ready() -> void:
@@ -85,6 +88,7 @@ func build(g: GameState) -> void:
 		lo = lo.min(_pos(s.id))
 		hi = hi.max(_pos(s.id))
 	var table := _box(Vector3(hi.x - lo.x + 2.0, 0.1, hi.z - lo.z + 2.0), Color("#34343f"))
+	_center = (lo + hi) / 2
 	table.position = (lo + hi) / 2 - Vector3(0, 0.05, 0)
 	_root.add_child(table)
 
@@ -179,6 +183,91 @@ func popup_at_player(index: int, text: String, color: Color) -> void:
 
 func popup_at_space(id: int, text: String, color: Color) -> void:
 	_popup(_pos(id) + Vector3(0, 0.9, 0), text, color)
+
+
+## PAYDAY: fireworks over the Depot, a big gold banner and the player celebrating.
+func payday(index: int, amount: int) -> void:
+	var at := _pos(game.board.depot)
+	# Aim the show in over the board: the Depot may sit at an edge or corner.
+	var inward := (_center - at).normalized()
+	var label := _label("PAYDAY!\n+%d" % amount, 110, Color("#ffd84a"), true)
+	label.no_depth_test = true
+	label.outline_size = 16
+	label.position = at + inward * 1.2 + Vector3(0, 1.3, 0)
+	label.scale = Vector3.ONE * 0.2
+	_root.add_child(label)
+	var tw := create_tween()
+	tw.tween_property(label, "scale", Vector3.ONE, 0.3).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_interval(1.3)
+	tw.tween_property(label, "modulate:a", 0.0, 0.4)
+	tw.tween_callback(label.queue_free)
+	for i in FIREWORKS:
+		var side := Vector3(-inward.z, 0, inward.x) * randf_range(-1.5, 1.5)
+		var burst_at := at + inward * randf_range(1.0, 3.0) + side + Vector3(0, randf_range(1.2, 2.0), 0)
+		get_tree().create_timer(i * 0.25).timeout.connect(_launch_firework.bind(at, burst_at, _root))
+	(_tokens[index] as Character).celebrate()
+
+
+## A glowing rocket rises from `from` and bursts into sparks at `to`.
+func _launch_firework(from: Vector3, to: Vector3, root: Node3D) -> void:
+	if not is_instance_valid(root):
+		return
+	var color: Color = FIREWORK_COLORS[randi() % FIREWORK_COLORS.size()]
+	var rocket := MeshInstance3D.new()
+	var ball := SphereMesh.new()
+	ball.radius = 0.04
+	ball.height = 0.08
+	rocket.mesh = ball
+	rocket.material_override = _glow_material(color)
+	rocket.position = from + Vector3(0, 0.3, 0)
+	root.add_child(rocket)
+	var tw := create_tween()
+	tw.tween_property(rocket, "position", to, 0.4).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_QUAD)
+	tw.tween_callback(func():
+		rocket.queue_free()
+		_burst(to, color, root))
+
+
+func _burst(at: Vector3, color: Color, root: Node3D) -> void:
+	if not is_instance_valid(root):
+		return
+	var sparks := CPUParticles3D.new()
+	sparks.one_shot = true
+	sparks.explosiveness = 0.95
+	sparks.amount = 90
+	sparks.lifetime = 1.2
+	sparks.direction = Vector3.UP
+	sparks.spread = 180.0
+	sparks.initial_velocity_min = 1.4
+	sparks.initial_velocity_max = 2.2
+	sparks.gravity = Vector3(0, -2.0, 0)
+	sparks.damping_min = 1.0
+	sparks.damping_max = 1.6
+	var fade := Gradient.new()
+	fade.set_color(0, color.lightened(0.3))
+	fade.set_color(1, Color(color, 0.0))
+	sparks.color_ramp = fade
+	var dot := SphereMesh.new()
+	dot.radius = 0.045
+	dot.height = 0.09
+	dot.radial_segments = 6
+	dot.rings = 3
+	sparks.mesh = dot
+	var m := _glow_material(Color.WHITE)
+	m.vertex_color_use_as_albedo = true
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	sparks.material_override = m
+	sparks.position = at
+	root.add_child(sparks)
+	sparks.emitting = true
+	get_tree().create_timer(sparks.lifetime + 0.3).timeout.connect(sparks.queue_free)
+
+
+func _glow_material(color: Color) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.albedo_color = color
+	return m
 
 
 func _process(delta: float) -> void:

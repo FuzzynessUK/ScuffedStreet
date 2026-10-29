@@ -1,19 +1,21 @@
 class_name Character
 extends Node3D
 ## A placeholder walking figure built from primitives: head, body, two arms and
-## two legs that swing while walk_to() is moving it.
+## two legs that swing while walk_to() is moving it, and celebrate() for paydays.
 
 const HEIGHT := 0.5
 const STRIDE_SPEED := 14.0  # radians of swing phase per second
 const SWING := 0.7          # max limb swing, radians
 const SKIN := Color("#f1c9a5")
 const TROUSERS := Color("#2f3140")
+const CELEBRATE_SECONDS := 1.8
 
 var _legs: Array[Node3D] = []
 var _arms: Array[Node3D] = []
 var _body: Node3D
 var _phase := 0.0
 var _walking := false
+var _celebrating := 0.0  # seconds of celebration left
 
 
 func setup(color: Color) -> void:
@@ -56,7 +58,23 @@ func walk_to(target: Vector3, seconds: float) -> void:
 	tw.tween_callback(func(): _walking = false)
 
 
+## Arms up, waving, and a few hops, facing the camera.
+func celebrate() -> void:
+	_celebrating = CELEBRATE_SECONDS
+	rotation.y = 0.0
+
+
 func _process(delta: float) -> void:
+	if _celebrating > 0.0:
+		_celebrating -= delta
+		var t := CELEBRATE_SECONDS - _celebrating
+		var wave := sin(t * 18.0) * 0.35
+		_arms[0].rotation.x = -2.7 + wave
+		_arms[1].rotation.x = -2.7 - wave
+		_legs[0].rotation.x = 0.0
+		_legs[1].rotation.x = 0.0
+		_body.position.y = absf(sin(t * 7.0)) * 0.16
+		return
 	if _walking:
 		_phase += delta * STRIDE_SPEED
 	else:

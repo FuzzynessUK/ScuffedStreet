@@ -6,7 +6,8 @@ extends RefCounted
 ##   start_turn() -> roll() -> options()/step() until moves run out -> land()
 ##   -> act on the returned offers (buy_lot, renovate, buy_bonds, ...) -> end_turn()
 ## Everything that happens is appended to `events` as
-## {text, kind, player, space}; kind is info, gain, loss, own, relay or win.
+## {text, kind, player, space}; kind is info, gain, loss, own, relay, card,
+## payday (which also carries "amount") or win.
 
 const TIER_NAMES := ["Shack", "Shop", "Store", "Megamart"]
 const TIER_VALUE := [1.0, 1.6, 2.6, 4.2]   # value = base price x this
@@ -208,7 +209,9 @@ func _pass(p: PlayerState, id: int) -> void:
 		"depot":
 			var pay := salary(p)
 			p.cash += pay
-			_note("%s collects %d salary (%d relays)" % [p.name, pay, p.punches.size()], "gain", p.index, id)
+			_note("PAYDAY! %s collects %d salary (%d suits)" % [p.name, pay, p.punches.size()],
+					"payday", p.index, id)
+			events[-1]["amount"] = pay
 			p.punches.clear()
 			if p.at_goal:
 				winner = p.index

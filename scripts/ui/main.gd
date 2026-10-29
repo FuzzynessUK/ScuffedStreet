@@ -10,6 +10,7 @@ const BOARD_PATH := "res://boards/scrapyard_loop.json"
 const STEP_DELAY := 0.32
 const CPU_DELAY := 0.6
 const BOND_LOT := 5  # bonds per market button press
+const PAYDAY_PAUSE := 1.8
 const HEAP_BACK := Color("#f29bd0")  # card backs: the Wildcard space colour
 const MARKET_HEADERS := ["Block", "Price", "This round", "Block value", "Holders", "Yours", "Worth"]
 const SETUPS := [
@@ -23,6 +24,7 @@ const KIND_COLORS := {
 	"info": Color("#c8c8d0"), "gain": Color("#5be37a"), "loss": Color("#ff6464"),
 	"win": Color("#ffd84a"),
 	"card": Color("#f29bd0"),
+	"payday": Color("#ffd84a"),
 }
 
 var game := GameState.new()
@@ -34,6 +36,7 @@ var buttons: VBoxContainer
 var log_box: RichTextLabel
 var _shown_events := 0
 var _last_cash: Array[int] = []
+var _payday_shown := false  # a PAYDAY played since the last _hold_for_payday()
 var heap_panel: Control
 var heap_title: Label
 var heap_reveal: Label
@@ -238,6 +241,7 @@ func _move_and_land(p: PlayerState, prompt: String) -> void:
 			to = await _choose_branch(p, opts)
 		game.step(to)
 		_refresh()
+		await _hold_for_payday()
 		await _wait(STEP_DELAY)
 	if game.game_over:
 		return
@@ -324,6 +328,7 @@ func _wildcard(p: PlayerState) -> void:
 		pick = await _card_choice(p, id)
 	var result := Wildcards.apply(game, p, id, pick)
 	_refresh()
+	await _hold_for_payday()
 	if game.game_over:
 		return
 	if result.get("move_again", false):
@@ -603,6 +608,13 @@ func _ask(p: PlayerState, prompt: String, choices: Array, cpu_value = null):
 	return value
 
 
+## Lets a PAYDAY celebration play out before the game moves on.
+func _hold_for_payday() -> void:
+	if _payday_shown:
+		_payday_shown = false
+		await _wait(PAYDAY_PAUSE)
+
+
 func _wait(seconds: float) -> void:
 	await get_tree().create_timer(seconds).timeout
 
@@ -634,6 +646,10 @@ func _refresh() -> void:
 		if e.kind != "info":
 			banner.text = e.text
 			banner.add_theme_color_override("font_color", color)
+		if e.kind == "payday":
+			board_view.payday(e.player, e.get("amount", 0))
+			_last_cash[e.player] = game.players[e.player].cash  # the banner shows it
+			_payday_shown = true
 		if e.kind == "relay":
 			var m: String = game.space(e.space).mark
 			board_view.popup_at_space(e.space, "%s %s!" % [BoardView.SUIT_SYMBOLS.get(m, ""), m.to_upper()], color)
