@@ -80,6 +80,7 @@ func test_renovation() -> void:
 	var g := new_game()
 	var p := g.players[0]
 	g.buy_lot(p, 5)  # B, 200
+	check(g.max_capital(5) == 200 * (0.6 + 1.0 + 1.6), "max capital: every tier still to go")
 	check(g.renovate_cost(5) == 120, "shop costs 0.6 x base")
 	g.renovate(p, 5, g.renovate_cost(5))
 	check(g.lot_value(5) == 320, "shop value 1.6 x base")

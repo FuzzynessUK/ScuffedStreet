@@ -128,6 +128,20 @@ func renovate_cost(id: int) -> int:
 	return roundi(cost)
 
 
+## Max capital: everything still to spend taking the lot up to a Megamart (with
+## the whole-block discount if it applies now); 0 once it is a Megamart.
+func max_capital(id: int) -> int:
+	var lot: Dictionary = lots[id]
+	var block: String = space(id).block
+	var rate := 1.0
+	if lot.owner >= 0 and owned_in_block(lot.owner, block) == board.lots_in_block(block).size():
+		rate = 0.75
+	var total := 0.0
+	for tier in range(lot.tier + 1, MAX_TIER + 1):
+		total += space(id).price * TIER_COST[tier] * rate
+	return roundi(total)
+
+
 func block_value(block: String) -> int:
 	var v := 0
 	for id in board.lots_in_block(block):

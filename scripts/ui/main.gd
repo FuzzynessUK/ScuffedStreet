@@ -15,7 +15,7 @@ const TICKER_SPIN := 1.2  # seconds a moved bond price spins before settling
 const TICKER_HOLD := 1.6  # seconds the ticker stays up afterwards
 const RENOVATION_SHOW := 1.6  # seconds the camera pulls back for a renovation
 const CARD_SIZE := Vector2(320, 420)
-const LOT_ROWS := ["Lot value", "Rent", "Next renovation", "Block"]
+const LOT_ROWS := ["Lot value", "Rent", "Max capital", "Block"]
 const CARD_SPIN := 1.3       # seconds the drawn card spins before landing
 const CARD_HALF_TURNS := 7   # odd, so it lands face up
 const HEAP_BACK := Color("#f29bd0")  # card backs: the Wildcard space colour
@@ -411,11 +411,11 @@ func _show_space_info(id: int) -> void:
 	var block: String = s.block
 	var total := game.board.lots_in_block(block).size()
 	var held := game.owned_in_block(owner, block) if owner >= 0 else 0
-	var reno := game.renovate_cost(id)
+	var capital := game.max_capital(id)
 	lot_values["Lot value"].text = "%d S" % game.lot_value(id)
 	lot_values["Rent"].text = "%d S" % game.rent(id) if owner >= 0 \
 			else "%d S" % roundi(game.lot_value(id) * GameState.TIER_RENT[0])
-	lot_values["Next renovation"].text = "%d S" % reno if reno > 0 else "Max"
+	lot_values["Max capital"].text = "%d S" % capital if capital > 0 else "Max"
 	lot_values["Block"].text = "%s  %d/%d" % [game.board.blocks[block].name, held, total]
 	lot_panel.visible = true
 
