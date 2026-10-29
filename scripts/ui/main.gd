@@ -48,6 +48,7 @@ var _ticker_shown := false
 var _ticker_serial := 0
 var _last_bond := {}  # block id -> bond price at the last _refresh()
 var _last_tiers := {}  # lot id -> renovation tier at the last _refresh()
+var _keys := {}  # while planning a route: "ui_up"/... or "back" -> value to choose
 var ticker_panel: PanelContainer
 var ticker_grid: GridContainer
 var card_view: Control
@@ -303,6 +304,7 @@ func _plan_route(p: PlayerState) -> void:
 		if path.size() == total:
 			board_view.highlight = []
 			board_view.sync()
+			_keys = {"ui_accept": true, "back": false, _dir(here, prev): false}
 			var go: bool = await _ask(p, "Go here? (%s)" % _space_title(here),
 					[["Go here", true], ["Back", false]])
 			if go:
@@ -317,11 +319,20 @@ func _plan_route(p: PlayerState) -> void:
 			choices.append(["Step to %s" % _space_title(o), o])
 		if not path.is_empty():
 			choices.append(["Back", -1])
+		_keys = {}
+		if not path.is_empty():
+			_keys[_dir(here, prev)] = -1
+			_keys["back"] = -1
+		for o in opts:
+			_keys[_dir(here, o)] = o
+		if opts.size() == 1:
+			_keys["ui_accept"] = opts[0]
 		var pick: int = await _ask(p, "%d of %d moves left." % [total - path.size(), total], choices)
 		if pick == -1:
 			path.pop_back()
 		else:
 			path.append(pick)
+	_keys = {}
 	board_view.highlight = []
 	board_view.zoom_for_highlight = true
 	board_view.clear_preview(p.index)
@@ -332,6 +343,32 @@ func _plan_route(p: PlayerState) -> void:
 		if game.game_over:
 			return
 
+
+## Which arrow (as a ui_* action) points from space `a` to space `b` on screen;
+## the camera always looks the same way, so board up is screen up.
+func _dir(a: int, b: int) -> String:
+	var dx: float = game.space(b).x - game.space(a).x
+	var dy: float = game.space(b).y - game.space(a).y
+	if absf(dx) >= absf(dy):
+		return "ui_right" if dx > 0 else "ui_left"
+	return "ui_down" if dy > 0 else "ui_up"
+
+
+## Arrow keys (or d-pad) step while planning a route; the arrow back the way
+## you came, Backspace or Escape undo a step; Enter confirms "Go here?".
+func _unhandled_input(event: InputEvent) -> void:
+	if _keys.is_empty():
+		return
+	var key := ""
+	for action in ["ui_up", "ui_down", "ui_left", "ui_right", "ui_accept"]:
+		if event.is_action_pressed(action):
+			key = action
+	if event.is_action_pressed("ui_cancel") or (event is InputEventKey and event.pressed
+			and not event.echo and event.keycode == KEY_BACKSPACE):
+		key = "back"
+	if key != "" and _keys.has(key):
+		get_viewport().set_input_as_handled()
+		chosen.emit(_keys[key])
 
 ## A short name for a space on buttons: the lot's name, the suit, or the type.
 func _space_title(id: int) -> String:
@@ -878,6 +915,7 @@ func _ask(p: PlayerState, prompt: String, choices: Array, cpu_value = null):
 	for c in choices:
 		var b := Button.new()
 		b.text = c[0]
+		b.focus_mode = Control.FOCUS_NONE
 		b.pressed.connect(func(): chosen.emit(c[1]))
 		buttons.add_child(b)
 	var value = await chosen

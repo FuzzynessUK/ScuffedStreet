@@ -31,6 +31,9 @@ salary) are used freely; specific mechanics are not copied from any game.
   picks a branch. You may never step back onto the space you just came from,
   but while planning you can press **Back** to undo steps. After the last
   step the game asks **"Go here?"**; only a confirmed route counts.
+- Keyboard: the arrow keys (or d-pad) step in that direction on screen; the
+  arrow back the way you came, Backspace or Escape undo a step; Enter or
+  Space confirms "Go here?" (or takes the only way forward).
 - Standing on or passing over a lot shows its details: owner and tier, lot
   value, rent, max capital (everything still to spend to reach a Megamart) and
   how much of the block the owner holds.
