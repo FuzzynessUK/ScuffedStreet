@@ -36,16 +36,17 @@ salary) are used freely; specific mechanics are not copied from any game.
 
 - Each board has **4 Relay** spaces, one per card suit: Spade, Heart, Diamond
   and Club, each with its own colour, shown as a suit beacon on the space and
-  as suit pips on the player panel. (The suits are only the markers; the
-  salary rule below is ours: no full set or promotion is required.) Passing or landing on a Relay you have not
+  as suit pips on the player panel. (There are no promotion levels; a
+  PAYDAY always pays by the formula below.) Passing or landing on a Relay you have not
   visited this lap gives you its **punch** (each Relay counts once per lap).
-- Passing or landing on the **Depot** pays salary and resets your punches:
+- Passing or landing on the **Depot** with **all four suits** is a **PAYDAY**:
+  fireworks, and your salary, and your suits reset:
 
-  `salary = base_salary + punches × relay_bonus + 5% of your total lot value`
+  `salary = base_salary + 4 × relay_bonus + 5% of your total lot value`
 
-  Defaults: base 200, relay bonus 120. A lap with no punches still pays base.
-- So there is no required order or "full set": every Relay you hit adds money,
-  and big landlords earn more from laps.
+  Defaults: base 200, relay bonus 120. Collect the suits in any order.
+- Reaching the Depot without every suit pays nothing; you keep the suits you
+  have. Landing on the Depot always opens the Bond Market.
 
 ## Lots and blocks
 
@@ -106,7 +107,7 @@ Landing on a rival's lot, after paying rent you may **buy it out** for
 
 | Space    | Effect |
 |----------|--------|
-| Depot    | Start. Salary when passed/landed. Bond trading when you start a turn here. |
+| Depot    | Start. PAYDAY when passed/landed holding all four suits. Bond Market when you land or start a turn here. |
 | Relay    | Punch for this lap (see above). Landing also gives 50 S. |
 | Lot      | Buy / pay rent / renovate. |
 | Market   | Trade bonds. |
@@ -148,7 +149,7 @@ valid choice. Only Swap Meet may be declined.
 11. **Tax Refund** — gain 5% of your lot value.
 12. **Swap Meet** — swap one of your Shacks for a rival's Shack, paying them the difference if theirs is worth more.
 13. **Charity** — the richest player gives 100 to the poorest.
-14. **Back to Base** — go straight to the Depot, collect salary (wins if at goal).
+14. **Back to Base** — go straight to the Depot (PAYDAY with every suit; wins if at goal).
 15. **Free Renovation** — renovate one of your lots by one tier for free.
 16. **Pot Luck** — take half the Pot.
 17. **Heavy Traffic** — you don't move on your next turn.

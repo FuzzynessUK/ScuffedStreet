@@ -155,6 +155,10 @@ func net_worth(p: PlayerState) -> int:
 	return v
 
 
+func has_all_suits(p: PlayerState) -> bool:
+	return p.punches.size() >= board.relay_ids().size()
+
+
 func salary(p: PlayerState) -> int:
 	return board.base_salary + p.punches.size() * board.relay_bonus + roundi(lot_worth(p) * 0.05)
 
@@ -207,12 +211,17 @@ func step(to: int) -> void:
 func _pass(p: PlayerState, id: int) -> void:
 	match space(id).type:
 		"depot":
-			var pay := salary(p)
-			p.cash += pay
-			_note("PAYDAY! %s collects %d salary (%d suits)" % [p.name, pay, p.punches.size()],
-					"payday", p.index, id)
-			events[-1]["amount"] = pay
-			p.punches.clear()
+			# PAYDAY only with every suit; otherwise the Depot pays nothing and
+			# the suits collected so far are kept.
+			if has_all_suits(p):
+				var pay := salary(p)
+				p.cash += pay
+				_note("PAYDAY! %s collects %d salary" % [p.name, pay], "payday", p.index, id)
+				events[-1]["amount"] = pay
+				p.punches.clear()
+			else:
+				_note("%s has %d of %d suits: no PAYDAY yet" % [p.name, p.punches.size(),
+						board.relay_ids().size()], "info", p.index, id)
 			if p.at_goal:
 				winner = p.index
 				game_over = true
@@ -231,6 +240,8 @@ func land() -> Array[Dictionary]:
 	var s := space(id)
 	var offers: Array[Dictionary] = []
 	match s.type:
+		"depot":
+			offers.append({"kind": "market"})
 		"relay":
 			p.cash += RELAY_LAND_BONUS
 			_note("%s lands on %s: +%d" % [p.name, _label(id), RELAY_LAND_BONUS], "gain", p.index, id)

@@ -14,6 +14,9 @@ const PAYDAY_PAUSE := 1.8
 const TICKER_SPIN := 1.2  # seconds a moved bond price spins before settling
 const TICKER_HOLD := 1.6  # seconds the ticker stays up afterwards
 const RENOVATION_SHOW := 1.6  # seconds the camera pulls back for a renovation
+const CARD_SIZE := Vector2(320, 420)
+const CARD_SPIN := 1.3       # seconds the drawn card spins before landing
+const CARD_HALF_TURNS := 7   # odd, so it lands face up
 const HEAP_BACK := Color("#f29bd0")  # card backs: the Wildcard space colour
 const MARKET_HEADERS := ["Block", "Price", "This round", "Block value", "Holders", "Yours", "Worth"]
 const SETUPS := [
@@ -46,6 +49,11 @@ var _last_bond := {}  # block id -> bond price at the last _refresh()
 var _last_tiers := {}  # lot id -> renovation tier at the last _refresh()
 var ticker_panel: PanelContainer
 var ticker_grid: GridContainer
+var card_view: Control
+var card_box: PanelContainer
+var card_name: Label
+var card_text: Label
+var card_bonus: Label
 var heap_panel: Control
 var heap_title: Label
 var heap_reveal: Label
@@ -114,6 +122,7 @@ func _build_ui() -> void:
 	_build_heap(board_area)
 	_build_market(board_area)
 	_build_ticker(board_area)
+	_build_card_view(board_area)
 
 	var panel := PanelContainer.new()
 	panel.custom_minimum_size = Vector2(400, 0)
@@ -333,12 +342,17 @@ func _renovate(p: PlayerState, offers: Array[Dictionary]) -> void:
 
 func _wildcard(p: PlayerState) -> void:
 	var slot := await _pick_from_heap(p)
+	var cash_before := p.cash
+	var patch := game.patch_size(slot, p.index)
 	var id := game.take_from_heap(slot)
+	var bonus := p.cash - cash_before
 	var c := Wildcards.card(id)
 	heap_buttons[slot].text = c.name
 	_style_card(heap_buttons[slot], "face", BoardView.PLAYER_COLORS[p.index])
-	heap_reveal.text = "%s\n%s" % [c.name.to_upper(), c.text]
+	_refresh()
+	await _spin_card(c, bonus, patch, BoardView.PLAYER_COLORS[p.index])
 	await _ask(p, "%s drew %s." % [p.name, c.name], [["OK", true]], true)
+	card_view.visible = false
 	heap_panel.visible = false
 
 	var pick = null
@@ -449,6 +463,85 @@ func _market(p: PlayerState, prompt: String) -> void:
 				break
 		_refresh()
 	market_panel.visible = false
+
+
+## The drawn card, shown big in the middle of the board: it spins in face
+## down, slows, and lands face up with its effect and any patch bonus.
+func _build_card_view(parent: Control) -> void:
+	card_view = CenterContainer.new()
+	card_view.set_anchors_preset(Control.PRESET_FULL_RECT)
+	card_view.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	card_view.visible = false
+	parent.add_child(card_view)
+	card_box = PanelContainer.new()
+	card_box.custom_minimum_size = CARD_SIZE
+	card_view.add_child(card_box)
+	var col := VBoxContainer.new()
+	col.alignment = BoxContainer.ALIGNMENT_CENTER
+	col.add_theme_constant_override("separation", 18)
+	card_box.add_child(col)
+	card_name = Label.new()
+	card_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	card_name.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	card_name.add_theme_font_size_override("font_size", 30)
+	col.add_child(card_name)
+	card_text = Label.new()
+	card_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	card_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	card_text.add_theme_font_size_override("font_size", 19)
+	card_text.add_theme_color_override("font_color", Color("#3a1030"))
+	col.add_child(card_text)
+	card_bonus = Label.new()
+	card_bonus.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	card_bonus.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	card_bonus.add_theme_font_size_override("font_size", 20)
+	col.add_child(card_bonus)
+
+
+func _spin_card(c: Dictionary, bonus: int, patch: int, color: Color) -> void:
+	card_view.visible = true
+	card_box.pivot_offset = CARD_SIZE / 2
+	_card_face(false, color)
+	card_name.text = "?"
+	card_text.text = ""
+	card_bonus.text = ""
+	var tw := create_tween()
+	tw.set_parallel()
+	tw.tween_property(card_box, "scale:y", 1.0, CARD_SPIN).from(0.3) \
+			.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	# Half-turns: scale.x follows |cos| so the card looks like it spins on its
+	# upright axis; the face shows for the last half-turn.
+	tw.tween_method(func(t: float):
+		var angle := t * CARD_HALF_TURNS * PI
+		card_box.scale.x = maxf(0.02, absf(cos(angle)))
+		var face := angle >= (CARD_HALF_TURNS - 0.5) * PI
+		if face and card_name.text == "?":
+			_card_face(true, color)
+			card_name.text = c.name.to_upper()
+			card_text.text = c.text
+			if bonus > 0:
+				card_bonus.text = "+%d patch bonus (%d cards)" % [bonus, patch]
+				card_bonus.add_theme_color_override("font_color", Color("#1f9a45"))
+			else:
+				card_bonus.text = "No patch bonus"
+				card_bonus.add_theme_color_override("font_color", Color("#9a7a90")),
+		0.0, 1.0, CARD_SPIN).set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
+	await tw.finished
+	card_box.scale = Vector2.ONE
+
+
+func _card_face(face_up: bool, color: Color) -> void:
+	var box := StyleBoxFlat.new()
+	box.bg_color = Color("#fff8fc") if face_up else HEAP_BACK
+	box.border_color = color
+	box.set_border_width_all(8)
+	box.set_corner_radius_all(18)
+	box.set_content_margin_all(22)
+	box.shadow_color = Color(0, 0, 0, 0.5)
+	box.shadow_size = 12
+	card_box.add_theme_stylebox_override("panel", box)
+	card_name.add_theme_color_override("font_color", Color("#3a1030"))
+	card_name.add_theme_font_size_override("font_size", 30 if face_up else 96)
 
 
 ## The Bond Market: a table of every block's bond price, its move this round,

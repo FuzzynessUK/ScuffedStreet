@@ -107,8 +107,17 @@ func test_salary_and_relays() -> void:
 	p.punches.append(24)
 	before = p.cash
 	g.step(0)
-	check(p.cash == before + 200 + 2 * g.board.relay_bonus, "salary counts two punches")
-	check(p.punches.is_empty(), "punches reset at depot")
+	check(p.cash == before, "no PAYDAY without every suit")
+	check(p.punches.size() == 2, "suits are kept when there is no PAYDAY")
+	p.punches.append(9)
+	p.punches.append(17)
+	p.position = 25
+	p.came_from = 24
+	before = p.cash
+	g.step(0)
+	check(p.cash == before + 200 + 4 * g.board.relay_bonus, "PAYDAY with all four suits")
+	check(p.punches.is_empty(), "suits reset after PAYDAY")
+	check(g.land().any(func(o): return o.kind == "market"), "landing on the Depot opens the market")
 
 
 func test_branching() -> void:
@@ -219,10 +228,11 @@ func test_wildcards() -> void:
 
 	g.current = 0
 	p.position = 10
+	p.punches.assign(g.board.relay_ids())
 	before = p.cash
 	var r := Wildcards.apply(g, p, 13)  # Back to Base
 	check(p.position == 0 and r.get("land_again", false), "back to base")
-	check(p.cash > before, "back to base pays salary")
+	check(p.cash > before, "back to base pays salary with every suit")
 
 	p.position = 1
 	p.punches.clear()

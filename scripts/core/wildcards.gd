@@ -22,7 +22,7 @@ const CARDS := [
 	{"name": "Tax Refund", "text": "Gain 5% of your lot value.", "pick": "none"},
 	{"name": "Swap Meet", "text": "Swap one of your Shacks for a rival's Shack, paying the difference if theirs is worth more.", "pick": "swap"},
 	{"name": "Charity", "text": "The richest player gives 100 to the poorest.", "pick": "none"},
-	{"name": "Back to Base", "text": "Go straight to the Depot and collect salary.", "pick": "none"},
+	{"name": "Back to Base", "text": "Go straight to the Depot (PAYDAY if you hold every suit).", "pick": "none"},
 	{"name": "Free Renovation", "text": "Renovate one of your lots by one tier for free.", "pick": "own_lot_upgradable"},
 	{"name": "Pot Luck", "text": "Take half the Pot.", "pick": "none"},
 	{"name": "Heavy Traffic", "text": "You don't move on your next turn.", "pick": "none"},
