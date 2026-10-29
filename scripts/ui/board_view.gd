@@ -15,6 +15,9 @@ const UNOWNED_BUILDING := Color("#d8d8de")
 const FIGURE_SCALE := 1.35
 const SIGN_HEIGHT := 0.32
 const SUIT_HEIGHT := 0.65
+const CAMERA_DIR := Vector3(0, 0.85, 0.55)  # from the look point towards the camera
+const FOLLOW_DIST := 7.5   # camera distance when following a player
+const CAMERA_EASE := 4.0   # how quickly the camera glides to where it should be
 const FIREWORKS := 6
 const FIREWORK_COLORS := [Color("#ff4a5a"), Color("#ffd84a"), Color("#4ae0ff"), Color("#7dff6a"), Color("#ff7ae8"), Color("#ffffff")]
 const UNOWNED_DIM := 0.6
@@ -44,6 +47,10 @@ var _popups: Array[Label3D] = []
 var _spinners: Array[Node3D] = []  # suit symbols swaying above the Relays
 var _time := 0.0
 var _center := Vector3.ZERO  # middle of the board
+var _overview_pos := Vector3.ZERO
+var _overview_look := Vector3.ZERO
+var _overview_until := 0.0  # show the whole board until this _time
+var _cam_look := Vector3.ZERO
 
 
 func _ready() -> void:
@@ -115,6 +122,10 @@ func build(g: GameState) -> void:
 	_root.add_child(_ring)
 
 	_frame_camera()
+	_camera.position = _overview_pos
+	_cam_look = _overview_look
+	_camera.look_at(_cam_look, Vector3.UP)
+	overview(1.5)
 	sync(true)
 
 
@@ -185,11 +196,30 @@ func popup_at_space(id: int, text: String, color: Color) -> void:
 	_popup(_pos(id) + Vector3(0, 0.9, 0), text, color)
 
 
+## Pulls the camera back to show the whole board for `seconds`.
+func overview(seconds: float) -> void:
+	_overview_until = maxf(_overview_until, _time + seconds)
+
+
+## Whole board during an overview or while choices are highlighted, else close
+## behind the current player.
+func _move_camera(delta: float) -> void:
+	var look := _overview_look
+	var pos := _overview_pos
+	if _time >= _overview_until and highlight.is_empty():
+		look = _tokens[game.current].position
+		pos = look + CAMERA_DIR.normalized() * FOLLOW_DIST
+	var k := minf(1.0, delta * CAMERA_EASE)
+	_camera.position = _camera.position.lerp(pos, k)
+	_cam_look = _cam_look.lerp(look, k)
+	_camera.look_at(_cam_look, Vector3.UP)
+
 ## PAYDAY: fireworks over the Depot, a big gold banner and the player celebrating.
 func payday(index: int, amount: int) -> void:
 	var at := _pos(game.board.depot)
 	# Aim the show in over the board: the Depot may sit at an edge or corner.
 	var inward := (_center - at).normalized()
+	overview(2.4)
 	var label := _label("PAYDAY!\n+%d" % amount, 110, Color("#ffd84a"), true)
 	label.no_depth_test = true
 	label.outline_size = 16
@@ -274,6 +304,7 @@ func _process(delta: float) -> void:
 	_time += delta
 	if game == null or _tokens.is_empty():
 		return
+	_move_camera(delta)
 	_ring.position = _tokens[game.current].position + Vector3(0, 0.03, 0)
 	for i in _spinners.size():
 		var s := _spinners[i]
@@ -447,6 +478,8 @@ func _popup(pos: Vector3, text: String, color: Color) -> void:
 	tw.chain().tween_callback(label.queue_free)
 
 
+## Works out the whole-board view; _process() moves the camera between it and
+## the close follow view of the current player.
 func _frame_camera() -> void:
 	if game == null or _camera == null:
 		return
@@ -460,8 +493,8 @@ func _frame_camera() -> void:
 	var aspect := view.x / maxf(view.y, 1.0)
 	var need := maxf(hi.z - lo.z, (hi.x - lo.x) / aspect) + 2.6
 	var dist := need * 0.5 / tan(deg_to_rad(_camera.fov * 0.5))
-	_camera.position = center + Vector3(0, 0.85, 0.55).normalized() * dist
-	_camera.look_at(center, Vector3.UP)
+	_overview_look = center
+	_overview_pos = center + CAMERA_DIR.normalized() * dist
 
 
 # --- helpers ------------------------------------------------------------

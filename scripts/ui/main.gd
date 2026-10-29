@@ -13,6 +13,7 @@ const BOND_LOT := 5  # bonds per market button press
 const PAYDAY_PAUSE := 1.8
 const TICKER_SPIN := 1.2  # seconds a moved bond price spins before settling
 const TICKER_HOLD := 1.6  # seconds the ticker stays up afterwards
+const RENOVATION_SHOW := 1.6  # seconds the camera pulls back for a renovation
 const HEAP_BACK := Color("#f29bd0")  # card backs: the Wildcard space colour
 const MARKET_HEADERS := ["Block", "Price", "This round", "Block value", "Holders", "Yours", "Worth"]
 const SETUPS := [
@@ -42,6 +43,7 @@ var _payday_shown := false  # a PAYDAY played since the last _hold_for_shows()
 var _ticker_shown := false
 var _ticker_serial := 0
 var _last_bond := {}  # block id -> bond price at the last _refresh()
+var _last_tiers := {}  # lot id -> renovation tier at the last _refresh()
 var ticker_panel: PanelContainer
 var ticker_grid: GridContainer
 var heap_panel: Control
@@ -211,6 +213,9 @@ func _start_menu() -> void:
 	_last_cash.clear()
 	for p in game.players:
 		_last_cash.append(p.cash)
+	_last_tiers.clear()
+	for id in game.lots:
+		_last_tiers[id] = game.lots[id].tier
 	_last_bond.clear()
 	for block in game.board.blocks:
 		_last_bond[block] = game.bond_price(block)
@@ -686,6 +691,7 @@ func _show_ticker(changed: Dictionary) -> void:
 			_spin(price_label, move_label, changed[block], price)
 	ticker_panel.visible = true
 	_ticker_shown = true
+	board_view.overview(TICKER_SPIN + TICKER_HOLD)
 	_ticker_serial += 1
 	var serial := _ticker_serial
 	await _wait(TICKER_SPIN + TICKER_HOLD)
@@ -762,6 +768,14 @@ func _refresh() -> void:
 			board_view.popup_at_player(p.index, "%+d" % diff,
 					KIND_COLORS.gain if diff > 0 else KIND_COLORS.loss)
 			_last_cash[p.index] = p.cash
+	for id in game.lots:
+		var tier: int = game.lots[id].tier
+		if tier > _last_tiers.get(id, tier) and game.lots[id].owner >= 0:
+			board_view.overview(RENOVATION_SHOW)
+			board_view.popup_at_space(id, GameState.TIER_NAMES[tier].to_upper() + "!",
+					BoardView.PLAYER_COLORS[game.lots[id].owner])
+			_ticker_shown = true  # hold the turn while it shows
+		_last_tiers[id] = tier
 	var moved := {}
 	for block in game.board.blocks:
 		var price := game.bond_price(block)
