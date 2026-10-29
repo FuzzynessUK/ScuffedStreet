@@ -100,13 +100,11 @@ func test_salary_and_relays() -> void:
 	g.moves_left = 1
 	g.step(4)
 	check(p.punches == [4], "relay punched on entry")
-	var before := p.cash
-	g.land()
-	check(p.cash == before + 50, "relay landing bonus")
+	check(g.land().any(func(o): return o.kind == "wildcard"), "landing on a suit opens the Scrap Heap")
 	p.position = 25
 	p.came_from = 24
 	p.punches.append(24)
-	before = p.cash
+	var before := p.cash
 	g.step(0)
 	check(p.cash == before, "no PAYDAY without every suit")
 	check(p.punches.size() == 2, "suits are kept when there is no PAYDAY")

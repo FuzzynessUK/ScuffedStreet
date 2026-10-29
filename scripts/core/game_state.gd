@@ -14,7 +14,6 @@ const TIER_VALUE := [1.0, 1.6, 2.6, 4.2]   # value = base price x this
 const TIER_RENT := [0.10, 0.14, 0.18, 0.24] # rent = value x this
 const TIER_COST := [0.0, 0.6, 1.0, 1.6]    # cost to reach tier i = base x this
 const MAX_TIER := 3
-const RELAY_LAND_BONUS := 50
 const TOLL_RATE := 0.08
 const BANK_SELL_RATE := 0.7
 const DIVIDEND_RATE := 0.01
@@ -262,9 +261,8 @@ func land() -> Array[Dictionary]:
 	match s.type:
 		"depot":
 			offers.append({"kind": "market"})
-		"relay":
-			p.cash += RELAY_LAND_BONUS
-			_note("%s lands on %s: +%d" % [p.name, _label(id), RELAY_LAND_BONUS], "gain", p.index, id)
+		"relay", "wildcard":
+			offers.append({"kind": "wildcard"})
 		"lot":
 			var lot: Dictionary = lots[id]
 			if lot.owner < 0:
@@ -298,8 +296,6 @@ func land() -> Array[Dictionary]:
 			p.came_from = id
 			p.position = s.pair
 			_note("%s takes the detour to %s" % [p.name, _label(s.pair)], "info", p.index, s.pair)
-		"wildcard":
-			offers.append({"kind": "wildcard"})
 	return offers
 
 

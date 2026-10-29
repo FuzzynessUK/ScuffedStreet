@@ -50,6 +50,7 @@ salary) are used freely; specific mechanics are not copied from any game.
   as suit pips on the player panel. (There are no promotion levels; a
   PAYDAY always pays by the formula below.) Passing or landing on a Relay you have not
   visited this lap gives you its **punch** (each Relay counts once per lap).
+  **Landing** on a suit also opens the Scrap Heap: pick a Wildcard.
 - Passing or landing on the **Depot** with **all four suits** is a **PAYDAY**:
   fireworks, and your salary, and your suits reset:
 
@@ -119,7 +120,7 @@ Landing on a rival's lot, after paying rent you may **buy it out** for
 | Space    | Effect |
 |----------|--------|
 | Depot    | Start. PAYDAY when passed/landed holding all four suits. Bond Market when you land or start a turn here. |
-| Relay    | Punch for this lap (see above). Landing also gives 50 S. |
+| Relay    | Suit for this lap (see above). Landing also opens the Scrap Heap. |
 | Lot      | Buy / pay rent / renovate. |
 | Market   | Trade bonds. |
 | Wildcard | Draw a Wildcard (see deck). |
