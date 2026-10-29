@@ -11,6 +11,8 @@ const STEP_DELAY := 0.32
 const CPU_DELAY := 0.6
 const BOND_LOT := 5  # bonds per market button press
 const PAYDAY_PAUSE := 1.8
+const TICKER_SPIN := 1.2  # seconds a moved bond price spins before settling
+const TICKER_HOLD := 1.6  # seconds the ticker stays up afterwards
 const HEAP_BACK := Color("#f29bd0")  # card backs: the Wildcard space colour
 const MARKET_HEADERS := ["Block", "Price", "This round", "Block value", "Holders", "Yours", "Worth"]
 const SETUPS := [
@@ -36,7 +38,12 @@ var buttons: VBoxContainer
 var log_box: RichTextLabel
 var _shown_events := 0
 var _last_cash: Array[int] = []
-var _payday_shown := false  # a PAYDAY played since the last _hold_for_payday()
+var _payday_shown := false  # a PAYDAY played since the last _hold_for_shows()
+var _ticker_shown := false
+var _ticker_serial := 0
+var _last_bond := {}  # block id -> bond price at the last _refresh()
+var ticker_panel: PanelContainer
+var ticker_grid: GridContainer
 var heap_panel: Control
 var heap_title: Label
 var heap_reveal: Label
@@ -104,6 +111,7 @@ func _build_ui() -> void:
 	board_area.add_child(banner)
 	_build_heap(board_area)
 	_build_market(board_area)
+	_build_ticker(board_area)
 
 	var panel := PanelContainer.new()
 	panel.custom_minimum_size = Vector2(400, 0)
@@ -203,6 +211,9 @@ func _start_menu() -> void:
 	_last_cash.clear()
 	for p in game.players:
 		_last_cash.append(p.cash)
+	_last_bond.clear()
+	for block in game.board.blocks:
+		_last_bond[block] = game.bond_price(block)
 	_run()
 
 
@@ -241,7 +252,7 @@ func _move_and_land(p: PlayerState, prompt: String) -> void:
 			to = await _choose_branch(p, opts)
 		game.step(to)
 		_refresh()
-		await _hold_for_payday()
+		await _hold_for_shows()
 		await _wait(STEP_DELAY)
 	if game.game_over:
 		return
@@ -289,6 +300,7 @@ func _resolve(p: PlayerState, offers: Array[Dictionary]) -> void:
 			"wildcard":
 				await _wildcard(p)
 		_refresh()
+		await _hold_for_shows()
 		if game.game_over:
 			return
 	if not renovations.is_empty():
@@ -311,6 +323,7 @@ func _renovate(p: PlayerState, offers: Array[Dictionary]) -> void:
 	if pick != null:
 		game.renovate(p, pick.lot, pick.cost)
 		_refresh()
+		await _hold_for_shows()
 
 
 func _wildcard(p: PlayerState) -> void:
@@ -328,7 +341,7 @@ func _wildcard(p: PlayerState) -> void:
 		pick = await _card_choice(p, id)
 	var result := Wildcards.apply(game, p, id, pick)
 	_refresh()
-	await _hold_for_payday()
+	await _hold_for_shows()
 	if game.game_over:
 		return
 	if result.get("move_again", false):
@@ -406,6 +419,7 @@ func _market(p: PlayerState, prompt: String) -> void:
 	if p.is_cpu:
 		Cpu.trade(game, p)
 		_refresh()
+		await _hold_for_shows()
 		return
 	prompt_label.text = prompt
 	for c in buttons.get_children():
@@ -608,11 +622,98 @@ func _ask(p: PlayerState, prompt: String, choices: Array, cpu_value = null):
 	return value
 
 
-## Lets a PAYDAY celebration play out before the game moves on.
-func _hold_for_payday() -> void:
+## Lets a PAYDAY celebration or a bond ticker spin play out before moving on.
+func _hold_for_shows() -> void:
+	var seconds := 0.0
 	if _payday_shown:
-		_payday_shown = false
-		await _wait(PAYDAY_PAUSE)
+		seconds = PAYDAY_PAUSE
+	if _ticker_shown:
+		seconds = maxf(seconds, TICKER_SPIN + 0.7)
+	_payday_shown = false
+	_ticker_shown = false
+	if seconds > 0.0:
+		await _wait(seconds)
+
+
+## Bond Ticker: every block's bond price, shown whenever any of them moves.
+## Moved prices spin like a slot machine reel, then settle on the new value.
+func _build_ticker(parent: Control) -> void:
+	ticker_panel = PanelContainer.new()
+	ticker_panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	ticker_panel.offset_left = -300
+	ticker_panel.offset_top = 56
+	ticker_panel.offset_right = -12
+	ticker_panel.visible = false
+	var bg := StyleBoxFlat.new()
+	bg.bg_color = Color("#1c2a2a", 0.95)
+	bg.border_color = Color("#2e8b80")
+	bg.set_border_width_all(2)
+	bg.set_corner_radius_all(8)
+	bg.set_content_margin_all(10)
+	ticker_panel.add_theme_stylebox_override("panel", bg)
+	parent.add_child(ticker_panel)
+	var col := VBoxContainer.new()
+	ticker_panel.add_child(col)
+	var title := Label.new()
+	title.text = "BOND TICKER"
+	title.add_theme_font_size_override("font_size", 16)
+	title.add_theme_color_override("font_color", Color("#7fd8cc"))
+	col.add_child(title)
+	ticker_grid = GridContainer.new()
+	ticker_grid.columns = 3
+	ticker_grid.add_theme_constant_override("h_separation", 14)
+	col.add_child(ticker_grid)
+
+
+## `changed` maps each moved block to its old price.
+func _show_ticker(changed: Dictionary) -> void:
+	for c in ticker_grid.get_children():
+		ticker_grid.remove_child(c)
+		c.queue_free()
+	for block in game.board.blocks:
+		var info: Dictionary = game.board.blocks[block]
+		var name_label := _cell(info.name, info.color.lightened(0.35))
+		name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+		ticker_grid.add_child(name_label)
+		var price := game.bond_price(block)
+		var price_label := _cell("%d" % price, Color.WHITE, 20)
+		price_label.custom_minimum_size = Vector2(56, 0)
+		ticker_grid.add_child(price_label)
+		var move_label := _cell("", Color.WHITE)
+		move_label.custom_minimum_size = Vector2(60, 0)
+		ticker_grid.add_child(move_label)
+		if changed.has(block):
+			_spin(price_label, move_label, changed[block], price)
+	ticker_panel.visible = true
+	_ticker_shown = true
+	_ticker_serial += 1
+	var serial := _ticker_serial
+	await _wait(TICKER_SPIN + TICKER_HOLD)
+	if serial == _ticker_serial:
+		ticker_panel.visible = false
+
+
+func _spin(price_label: Label, move_label: Label, from: int, to: int) -> void:
+	var up := to > from
+	var color: Color = KIND_COLORS.gain if up else KIND_COLORS.loss
+	var digits := str(maxi(from, to)).length()
+	price_label.add_theme_color_override("font_color", color.lightened(0.4))
+	var tw := create_tween()
+	# Reel phase: random numbers of the same width whirring past...
+	tw.tween_method(func(_t: float):
+		price_label.text = "%d" % randi_range(int(pow(10, digits - 1)), int(pow(10, digits)) - 1),
+		0.0, 1.0, TICKER_SPIN * 0.6)
+	# ...then rolling from the old price to the new one, slowing down.
+	tw.tween_method(func(t: float): price_label.text = "%d" % roundi(lerpf(from, to, t)),
+		0.0, 1.0, TICKER_SPIN * 0.4).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
+	tw.tween_callback(func():
+		price_label.text = "%d" % to
+		price_label.add_theme_color_override("font_color", color)
+		move_label.text = ("▲ +%d" if up else "▼ %d") % (to - from)
+		move_label.add_theme_color_override("font_color", color)
+		price_label.pivot_offset = price_label.size / 2)
+	tw.tween_property(price_label, "scale", Vector2.ONE * 1.25, 0.08)
+	tw.tween_property(price_label, "scale", Vector2.ONE, 0.12)
 
 
 func _wait(seconds: float) -> void:
@@ -661,6 +762,14 @@ func _refresh() -> void:
 			board_view.popup_at_player(p.index, "%+d" % diff,
 					KIND_COLORS.gain if diff > 0 else KIND_COLORS.loss)
 			_last_cash[p.index] = p.cash
+	var moved := {}
+	for block in game.board.blocks:
+		var price := game.bond_price(block)
+		if _last_bond.get(block, price) != price:
+			moved[block] = _last_bond[block]
+		_last_bond[block] = price
+	if not moved.is_empty() and not market_panel.visible:
+		_show_ticker(moved)
 	board_view.sync()
 
 
