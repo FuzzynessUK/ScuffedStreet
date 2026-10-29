@@ -523,6 +523,12 @@ func patch_bonus(size: int) -> int:
 ## Size of the patch `slot` belongs to (or would join) for `owner`: the slot
 ## plus every card of theirs connected to it up, down, left or right.
 func patch_size(slot: int, owner: int) -> int:
+	return patch_slots(slot, owner).size()
+
+
+## The slots in that patch, `slot` first.
+func patch_slots(slot: int, owner: int) -> Array[int]:
+	var out: Array[int] = [slot]
 	var seen := {slot: true}
 	var stack: Array[int] = [slot]
 	while not stack.is_empty():
@@ -531,7 +537,8 @@ func patch_size(slot: int, owner: int) -> int:
 			if not seen.has(n) and heap_owner[n] == owner:
 				seen[n] = true
 				stack.append(n)
-	return seen.size()
+				out.append(n)
+	return out
 
 
 func heap_neighbours(slot: int) -> Array[int]:

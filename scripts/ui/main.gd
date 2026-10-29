@@ -16,8 +16,8 @@ const TICKER_HOLD := 1.6  # seconds the ticker stays up afterwards
 const RENOVATION_SHOW := 1.6  # seconds the camera pulls back for a renovation
 const CARD_SIZE := Vector2(320, 420)
 const LOT_ROWS := ["Lot value", "Rent", "Max capital", "Block"]
-const CARD_SPIN := 1.3       # seconds the drawn card spins before landing
-const CARD_HALF_TURNS := 7   # odd, so it lands face up
+const TILE_SPIN := 3.0       # seconds the picked tile and its combo spin
+const TILE_HALF_TURNS := 11  # odd, so the picked tile lands face up
 const HEAP_BACK := Color("#f29bd0")  # card backs: the Wildcard space colour
 const MARKET_HEADERS := ["Block", "Price", "This round", "Block value", "Holders", "Yours", "Worth"]
 const SETUPS := [
@@ -491,14 +491,14 @@ func _renovate(p: PlayerState, offers: Array[Dictionary]) -> void:
 func _wildcard(p: PlayerState) -> void:
 	var slot := await _pick_from_heap(p)
 	var cash_before := p.cash
-	var patch := game.patch_size(slot, p.index)
+	var patch := game.patch_slots(slot, p.index)  # before taking: a full heap refills
 	var id := game.take_from_heap(slot)
 	var bonus := p.cash - cash_before
 	var c := Wildcards.card(id)
-	heap_buttons[slot].text = c.name
-	_style_card(heap_buttons[slot], "face", BoardView.PLAYER_COLORS[p.index])
+	var color: Color = BoardView.PLAYER_COLORS[p.index]
 	_refresh()
-	await _spin_card(c, bonus, patch, BoardView.PLAYER_COLORS[p.index])
+	await _spin_tiles(patch, c, bonus, color)
+	await _pop_card(c, bonus, patch.size(), color)
 	await _ask(p, "%s drew %s." % [p.name, c.name], [["OK", true]], true)
 	card_view.visible = false
 	heap_panel.visible = false
@@ -521,8 +521,9 @@ func _pick_from_heap(p: PlayerState) -> int:
 	lot_panel.visible = false
 	heap_panel.visible = true
 	heap_title.text = "%s: pick a card from the Scrap Heap" % p.name
-	heap_hint.text = "Cards next to your own (up, down, left, right) pay %d for each card in the patch after the first." % GameState.PATCH_BONUS
+	heap_hint.text = "Combo: a card next to your own (up, down, left, right) pays %d for each card joined after the first." % GameState.PATCH_BONUS
 	heap_reveal.text = ""
+	heap_reveal.add_theme_font_size_override("font_size", 18)
 	for i in heap_buttons.size():
 		var b := heap_buttons[i]
 		var owner := game.heap_owner[i]
@@ -615,8 +616,7 @@ func _market(p: PlayerState, prompt: String) -> void:
 	market_panel.visible = false
 
 
-## The drawn card, shown big in the middle of the board: it spins in face
-## down, slows, and lands face up with its effect and any patch bonus.
+## The drawn card, shown big in the middle of the board (see _pop_card).
 func _build_card_view(parent: Control) -> void:
 	card_view = CenterContainer.new()
 	card_view.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -648,36 +648,52 @@ func _build_card_view(parent: Control) -> void:
 	col.add_child(card_bonus)
 
 
-func _spin_card(c: Dictionary, bonus: int, patch: int, color: Color) -> void:
+## The picked tile and every card in the patch it joins spin in the grid while
+## the combo money counts up; then the picked tile lands face up.
+func _spin_tiles(slots: Array[int], c: Dictionary, bonus: int, color: Color) -> void:
+	var picked: Button = heap_buttons[slots[0]]
+	for s in slots:
+		heap_buttons[s].pivot_offset = heap_buttons[s].size / 2
+	heap_reveal.add_theme_font_size_override("font_size", 26)
+	var combo := slots.size() > 1
+	heap_reveal.add_theme_color_override("font_color", KIND_COLORS.gain if combo else Color("#c9a6bd"))
+	heap_reveal.text = "" if combo else "No combo"
+	var tw := create_tween()
+	tw.tween_method(func(t: float):
+		var angle := t * TILE_HALF_TURNS * PI
+		var sx := maxf(0.05, absf(cos(angle)))
+		for s in slots:
+			heap_buttons[s].scale.x = sx
+		# The picked tile shows its face for the final half-turn.
+		if angle >= (TILE_HALF_TURNS - 0.5) * PI and picked.text != c.name:
+			picked.text = c.name
+			_style_card(picked, "face", color)
+		if combo:
+			heap_reveal.text = "+%d COMBO! (%d cards)" % [roundi(bonus * minf(1.0, t * 1.4)), slots.size()],
+		0.0, 1.0, TILE_SPIN).set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
+	await tw.finished
+	for s in slots:
+		heap_buttons[s].scale = Vector2.ONE
+
+
+## The drawn card, big in the middle of the board, popping in face up with its
+## effect and the combo money earned.
+func _pop_card(c: Dictionary, bonus: int, patch: int, color: Color) -> void:
 	card_view.visible = true
 	card_box.pivot_offset = CARD_SIZE / 2
-	_card_face(false, color)
-	card_name.text = "?"
-	card_text.text = ""
-	card_bonus.text = ""
+	_card_face(true, color)
+	card_name.text = c.name.to_upper()
+	card_text.text = c.text
+	if bonus > 0:
+		card_bonus.text = "+%d combo bonus (%d cards)" % [bonus, patch]
+		card_bonus.add_theme_color_override("font_color", Color("#1f9a45"))
+	else:
+		card_bonus.text = "No combo"
+		card_bonus.add_theme_color_override("font_color", Color("#9a7a90"))
 	var tw := create_tween()
-	tw.set_parallel()
-	tw.tween_property(card_box, "scale:y", 1.0, CARD_SPIN).from(0.3) \
+	tw.tween_property(card_box, "scale", Vector2.ONE, 0.35).from(Vector2.ONE * 0.3) \
 			.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	# Half-turns: scale.x follows |cos| so the card looks like it spins on its
-	# upright axis; the face shows for the last half-turn.
-	tw.tween_method(func(t: float):
-		var angle := t * CARD_HALF_TURNS * PI
-		card_box.scale.x = maxf(0.02, absf(cos(angle)))
-		var face := angle >= (CARD_HALF_TURNS - 0.5) * PI
-		if face and card_name.text == "?":
-			_card_face(true, color)
-			card_name.text = c.name.to_upper()
-			card_text.text = c.text
-			if bonus > 0:
-				card_bonus.text = "+%d patch bonus (%d cards)" % [bonus, patch]
-				card_bonus.add_theme_color_override("font_color", Color("#1f9a45"))
-			else:
-				card_bonus.text = "No patch bonus"
-				card_bonus.add_theme_color_override("font_color", Color("#9a7a90")),
-		0.0, 1.0, CARD_SPIN).set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
 	await tw.finished
-	card_box.scale = Vector2.ONE
 
 
 func _card_face(face_up: bool, color: Color) -> void:
