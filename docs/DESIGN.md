@@ -34,13 +34,15 @@ salary) are used freely; specific mechanics are not copied from any game.
 
 ## Laps: Relays and salary
 
-- Each board has **3 Relay** spaces. Passing or landing on a Relay you have not
+- Each board has **4 Relay** spaces, each with its own colour and symbol (Gear,
+  Bolt, Wrench, Cog on Scrapyard Loop), shown on the space and as pips on the
+  player panel. Passing or landing on a Relay you have not
   visited this lap gives you its **punch** (each Relay counts once per lap).
 - Passing or landing on the **Depot** pays salary and resets your punches:
 
   `salary = base_salary + punches × relay_bonus + 5% of your total lot value`
 
-  Defaults: base 200, relay bonus 150. A lap with no punches still pays base.
+  Defaults: base 200, relay bonus 120. A lap with no punches still pays base.
 - So there is no required order or "full set": every Relay you hit adds money,
   and big landlords earn more from laps.
 

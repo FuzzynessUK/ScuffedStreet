@@ -5,7 +5,8 @@ extends RefCounted
 ## A controller (UI, CPU or network host) drives a turn:
 ##   start_turn() -> roll() -> options()/step() until moves run out -> land()
 ##   -> act on the returned offers (buy_lot, renovate, buy_bonds, ...) -> end_turn()
-## Everything that happens is appended to `events` as text for the log.
+## Everything that happens is appended to `events` as
+## {text, kind, player, space}; kind is info, gain, loss, own, relay or win.
 
 const TIER_NAMES := ["Shack", "Shop", "Store", "Megamart"]
 const TIER_VALUE := [1.0, 1.6, 2.6, 4.2]   # value = base price x this
@@ -32,7 +33,7 @@ var turn := 1
 var moves_left := 0
 var winner := -1
 var game_over := false
-var events: Array[String] = []
+var events: Array[Dictionary] = []
 var rng := RandomNumberGenerator.new()
 
 
@@ -158,13 +159,13 @@ func current_player() -> PlayerState:
 func start_turn() -> void:
 	var p := current_player()
 	p.at_goal = net_worth(p) >= board.goal
-	_note("Turn %d: %s (net worth %d)" % [turn, p.name, net_worth(p)])
+	_note("Turn %d: %s (net worth %d)" % [turn, p.name, net_worth(p)], "info", current)
 
 
 ## Rolls 2d4 and sets the moves to walk.
 func roll() -> int:
 	moves_left = rng.randi_range(1, 4) + rng.randi_range(1, 4)
-	_note("%s rolls %d" % [current_player().name, moves_left])
+	_note("%s rolls %d" % [current_player().name, moves_left], "info", current)
 	return moves_left
 
 
@@ -196,16 +197,16 @@ func _pass(p: PlayerState, id: int) -> void:
 		"depot":
 			var pay := salary(p)
 			p.cash += pay
-			_note("%s collects %d salary (%d relays)" % [p.name, pay, p.punches.size()])
+			_note("%s collects %d salary (%d relays)" % [p.name, pay, p.punches.size()], "gain", p.index, id)
 			p.punches.clear()
 			if p.at_goal:
 				winner = p.index
 				game_over = true
-				_note("%s reaches the Depot at goal and wins!" % p.name)
+				_note("%s reaches the Depot at goal and wins!" % p.name, "win", p.index, id)
 		"relay":
 			if id not in p.punches:
 				p.punches.append(id)
-				_note("%s punches %s" % [p.name, _label(id)])
+				_note("%s punches %s" % [p.name, _label(id)], "relay", p.index, id)
 
 
 ## Resolves the space the current player stopped on. Automatic effects happen
@@ -218,7 +219,7 @@ func land() -> Array[Dictionary]:
 	match s.type:
 		"relay":
 			p.cash += RELAY_LAND_BONUS
-			_note("%s lands on %s: +%d" % [p.name, _label(id), RELAY_LAND_BONUS])
+			_note("%s lands on %s: +%d" % [p.name, _label(id), RELAY_LAND_BONUS], "gain", p.index, id)
 		"lot":
 			var lot: Dictionary = lots[id]
 			if lot.owner < 0:
@@ -243,17 +244,17 @@ func land() -> Array[Dictionary]:
 			var fee := roundi(p.cash * TOLL_RATE)
 			if fee > 0:
 				charge(p, fee, -2)
-				_note("%s pays %d toll into the Pot" % [p.name, fee])
+				_note("%s pays %d toll into the Pot" % [p.name, fee], "loss", p.index, id)
 		"jackpot":
-			_note("%s takes the Pot: %d" % [p.name, pot])
+			_note("%s takes the Pot: %d" % [p.name, pot], "gain", p.index, id)
 			p.cash += pot
 			pot = 0
 		"detour":
 			p.came_from = id
 			p.position = s.pair
-			_note("%s takes the detour to %s" % [p.name, _label(s.pair)])
+			_note("%s takes the detour to %s" % [p.name, _label(s.pair)], "info", p.index, s.pair)
 		"wildcard":
-			_note("%s lands on a Wildcard (deck not implemented yet)" % p.name)
+			_note("%s lands on a Wildcard (deck not implemented yet)" % p.name, "info", p.index, id)
 	return offers
 
 
@@ -278,7 +279,7 @@ func buy_lot(p: PlayerState, id: int) -> bool:
 		return false
 	p.cash -= cost
 	lot.owner = p.index
-	_note("%s buys %s for %d" % [p.name, _label(id), cost])
+	_note("%s buys %s for %d" % [p.name, _label(id), cost], "own", p.index, id)
 	return true
 
 
@@ -290,7 +291,7 @@ func renovate(p: PlayerState, id: int, cost: int) -> bool:
 	p.cash -= cost
 	lot.tier += 1
 	bond_pressure.erase(space(id).block)
-	_note("%s renovates %s to a %s for %d" % [p.name, _label(id), TIER_NAMES[lot.tier], cost])
+	_note("%s renovates %s to a %s for %d" % [p.name, _label(id), TIER_NAMES[lot.tier], cost], "own", p.index, id)
 	return true
 
 
@@ -303,7 +304,7 @@ func buyout(p: PlayerState, id: int) -> bool:
 	p.cash -= cost
 	seller.cash += cost
 	lot.owner = p.index
-	_note("%s buys %s out from %s for %d" % [p.name, _label(id), seller.name, cost])
+	_note("%s buys %s out from %s for %d" % [p.name, _label(id), seller.name, cost], "own", p.index, id)
 	return true
 
 
@@ -312,7 +313,7 @@ func pay_rent(p: PlayerState, id: int) -> void:
 	if amount <= 0:
 		return
 	var owner := players[lots[id].owner]
-	_note("%s pays %d rent to %s" % [p.name, amount, owner.name])
+	_note("%s pays %d rent to %s" % [p.name, amount, owner.name], "loss", p.index, id)
 	charge(p, amount, owner.index)
 	var block: String = space(id).block
 	for q in players:
@@ -321,7 +322,7 @@ func pay_rent(p: PlayerState, id: int) -> void:
 			var div := roundi(amount * DIVIDEND_RATE * held)
 			if div > 0:
 				q.cash += div
-				_note("%s earns %d in dividends" % [q.name, div])
+				_note("%s earns %d in dividends" % [q.name, div], "gain", q.index)
 
 
 func buy_bonds(p: PlayerState, block: String, count: int) -> bool:
@@ -334,7 +335,7 @@ func buy_bonds(p: PlayerState, block: String, count: int) -> bool:
 	p.bonds[block] = p.bonds_in(block) + count
 	if count >= BIG_BOND_TRADE:
 		bond_pressure[block] = bond_pressure.get(block, 1.0) * (1.0 + BOND_PRESSURE)
-	_note("%s buys %d %s bonds at %d" % [p.name, count, board.blocks[block].name, price])
+	_note("%s buys %d %s bonds at %d" % [p.name, count, board.blocks[block].name, price], "own", p.index)
 	return true
 
 
@@ -348,7 +349,7 @@ func sell_bonds(p: PlayerState, block: String, count: int) -> bool:
 		p.bonds.erase(block)
 	if count >= BIG_BOND_TRADE:
 		bond_pressure[block] = bond_pressure.get(block, 1.0) * (1.0 - BOND_PRESSURE)
-	_note("%s sells %d %s bonds at %d" % [p.name, count, board.blocks[block].name, price])
+	_note("%s sells %d %s bonds at %d" % [p.name, count, board.blocks[block].name, price], "info", p.index)
 	return true
 
 
@@ -387,7 +388,7 @@ func raise_cash(p: PlayerState, needed: int) -> void:
 		raised += price
 		lots[id] = {"owner": -1, "tier": 0, "boost": 1.0}
 		bond_pressure.erase(space(id).block)
-		_note("%s sells %s to the bank for %d" % [p.name, _label(id), price])
+		_note("%s sells %s to the bank for %d" % [p.name, _label(id), price], "loss", p.index, id)
 
 
 func _go_broke(p: PlayerState) -> void:
@@ -399,7 +400,7 @@ func _go_broke(p: PlayerState) -> void:
 			best = q.index
 	winner = best
 	_note("%s is broke! %s wins with the highest net worth." % [p.name,
-			players[best].name if best >= 0 else "Nobody"])
+			players[best].name if best >= 0 else "Nobody"], "win", best)
 
 
 # --- helpers ------------------------------------------------------------
@@ -409,5 +410,5 @@ func _label(id: int) -> String:
 	return s.name if s.name != "" else "%s %d" % [s.type, id]
 
 
-func _note(text: String) -> void:
-	events.append(text)
+func _note(text: String, kind := "info", player := -1, at := -1) -> void:
+	events.append({"text": text, "kind": kind, "player": player, "space": at})

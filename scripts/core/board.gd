@@ -71,6 +71,8 @@ func load_data(data: Dictionary) -> String:
 			"block": str(s.get("block", "")),
 			"price": int(s.get("price", 0)),
 			"pair": int(s.get("pair", -1)),
+			"mark": str(s.get("mark", "")),
+			"color": Color.html(str(s.get("color", "#888888"))),
 		}
 		if type == "lot":
 			if not blocks.has(space.block):

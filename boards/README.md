@@ -23,6 +23,8 @@ Each space:
 | `block` | `lot`        | Block id. |
 | `price` | `lot`        | Base price. |
 | `pair`  | `detour`     | Id of the Detour space this one warps to. |
+| `mark`  | `relay`      | Short symbol name shown on the space and the player panel (e.g. `Gear`). |
+| `color` | `relay`      | The relay's colour, `#rrggbb`. Each relay should have a distinct one. |
 | `name`  | optional     | Display name. |
 
 Movement follows `next` only, so the board is directed. Exactly one `depot`

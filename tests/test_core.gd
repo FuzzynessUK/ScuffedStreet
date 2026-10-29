@@ -41,7 +41,8 @@ func test_board_loads() -> void:
 	check(b != null, "board loads")
 	check(b.spaces.size() == 33, "33 spaces")
 	check(b.depot == 0, "depot is space 0")
-	check(b.relay_ids().size() == 3, "three relays")
+	check(b.relay_ids().size() == 4, "four relays")
+	check(b.spaces[9].mark == "Bolt", "relay mark loaded")
 	check(b.lots_in_block("F").size() == 4, "block F has four lots")
 
 
@@ -105,7 +106,7 @@ func test_salary_and_relays() -> void:
 	p.punches.append(24)
 	before = p.cash
 	g.step(0)
-	check(p.cash == before + 200 + 2 * 150, "salary counts two punches")
+	check(p.cash == before + 200 + 2 * g.board.relay_bonus, "salary counts two punches")
 	check(p.punches.is_empty(), "punches reset at depot")
 
 

@@ -12,6 +12,9 @@ Open the folder in Godot 4.7 and press F5, or:
 
     Godot_v4.7.2-stable_win64.exe --path .
 
+Dev switches (after `--`): `--watch` starts an all-CPU game, `--shot=<file.png>`
+saves a screenshot after 8 seconds and quits.
+
 ## Tests
 
     Godot_v4.7.2-stable_win64_console.exe --headless --path . --import
@@ -24,6 +27,6 @@ reports how they end (useful for balancing).
 ## Layout
 
 - `scripts/core/` — rules engine with no UI (`GameState`, `Board`, `PlayerState`, `Cpu`)
-- `scripts/ui/` — the hot-seat screen and placeholder board drawing
+- `scripts/ui/` — the hot-seat screen and the basic 3D board (placeholder meshes)
 - `boards/` — board JSON files
 - `tests/` — headless tests and the CPU simulation

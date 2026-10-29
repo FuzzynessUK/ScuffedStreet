@@ -15,18 +15,39 @@ const SETUPS := [
 	["Watch 4 CPUs", [true, true, true, true]],
 ]
 
+const KIND_COLORS := {
+	"info": Color("#c8c8d0"), "gain": Color("#5be37a"), "loss": Color("#ff6464"),
+	"win": Color("#ffd84a"),
+}
+
 var game := GameState.new()
 var board_view: BoardView
+var banner: Label
 var players_label: RichTextLabel
 var prompt_label: Label
 var buttons: VBoxContainer
 var log_box: RichTextLabel
 var _shown_events := 0
+var _last_cash: Array[int] = []
 
 
 func _ready() -> void:
 	_build_ui()
+	# Dev switches after "--": --watch starts a 4-CPU game, --shot=<png> saves
+	# a screenshot after a few seconds and quits.
+	var args := OS.get_cmdline_user_args()
+	for arg in args:
+		if arg.begins_with("--shot="):
+			_screenshot_later(arg.substr(7))
 	_start_menu()
+	if "--watch" in args:
+		chosen.emit(SETUPS[3][1])
+
+
+func _screenshot_later(path: String) -> void:
+	await _wait(8.0)
+	get_viewport().get_texture().get_image().save_png(path)
+	get_tree().quit()
 
 
 func _build_ui() -> void:
@@ -35,10 +56,28 @@ func _build_ui() -> void:
 	row.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(row)
 
+	var board_area := Control.new()
+	board_area.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(board_area)
+	var view_box := SubViewportContainer.new()
+	view_box.stretch = true
+	view_box.set_anchors_preset(Control.PRESET_FULL_RECT)
+	board_area.add_child(view_box)
+	var viewport := SubViewport.new()
+	viewport.own_world_3d = true
+	viewport.msaa_3d = Viewport.MSAA_4X
+	view_box.add_child(viewport)
 	board_view = BoardView.new()
-	board_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	board_view.game = game
-	row.add_child(board_view)
+	viewport.add_child(board_view)
+
+	banner = Label.new()
+	banner.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	banner.offset_top = 12
+	banner.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	banner.add_theme_font_size_override("font_size", 26)
+	banner.add_theme_constant_override("outline_size", 8)
+	banner.add_theme_color_override("font_outline_color", Color.BLACK)
+	board_area.add_child(banner)
 
 	var panel := PanelContainer.new()
 	panel.custom_minimum_size = Vector2(380, 0)
@@ -67,8 +106,8 @@ func _build_ui() -> void:
 
 
 func _start_menu() -> void:
-	board_view.game = null
-	board_view.queue_redraw()
+	board_view.build(null)
+	banner.text = ""
 	players_label.text = "[b]Scuffed Street[/b]"
 	log_box.clear()
 	var opts := []
@@ -84,8 +123,11 @@ func _start_menu() -> void:
 			humans += 1
 			names.append("Player %d" % humans)
 	game.setup(Board.load_file(BOARD_PATH), names, cpu)
-	board_view.game = game
+	board_view.build(game)
 	_shown_events = 0
+	_last_cash.clear()
+	for p in game.players:
+		_last_cash.append(p.cash)
 	_run()
 
 
@@ -126,7 +168,7 @@ func _play_turn() -> void:
 
 func _choose_branch(p: PlayerState, opts: Array[int]) -> int:
 	board_view.highlight = opts
-	board_view.queue_redraw()
+	board_view.sync()
 	var choices := []
 	for o in opts:
 		choices.append(["Go to %s" % game._label(o), o])
@@ -238,11 +280,43 @@ func _refresh() -> void:
 		var bonds := 0
 		for b in p.bonds:
 			bonds += p.bonds[b]
-		lines.append("%s[color=#%s]■[/color] [b]%s[/b]  cash %d  worth %d  relays %d/%d  bonds %d%s" % [
-				mark, col, p.name, p.cash, game.net_worth(p), p.punches.size(),
-				game.board.relay_ids().size(), bonds, "  BROKE" if p.broke else ""])
+		var pips := ""
+		for r in game.board.relay_ids():
+			var rc: String = game.space(r).color.to_html(false) if r in p.punches else "4a4a55"
+			pips += "[color=#%s]●[/color]" % rc
+		lines.append("%s[color=#%s]■[/color] [b]%s[/b] %s  cash %d  worth %d  bonds %d%s" % [
+				mark, col, p.name, pips, p.cash, game.net_worth(p), bonds,
+				"  BROKE" if p.broke else ""])
 	players_label.text = "\n".join(lines)
+
 	while _shown_events < game.events.size():
-		log_box.add_text(game.events[_shown_events] + "\n")
+		var e: Dictionary = game.events[_shown_events]
+		var color := _event_color(e)
+		log_box.push_color(color)
+		log_box.add_text(e.text + "\n")
+		log_box.pop()
+		if e.kind != "info":
+			banner.text = e.text
+			banner.add_theme_color_override("font_color", color)
+		if e.kind == "relay":
+			board_view.popup_at_space(e.space, game.space(e.space).mark.to_upper() + "!", color)
 		_shown_events += 1
-	board_view.queue_redraw()
+
+	for p in game.players:
+		var diff := p.cash - _last_cash[p.index]
+		if diff != 0:
+			board_view.popup_at_player(p.index, "%+d" % diff,
+					KIND_COLORS.gain if diff > 0 else KIND_COLORS.loss)
+			_last_cash[p.index] = p.cash
+	board_view.sync()
+
+
+## Money in/out are green/red, relay punches take the relay's colour and
+## purchases/renovations the player's.
+func _event_color(e: Dictionary) -> Color:
+	match e.kind:
+		"relay":
+			return game.space(e.space).color
+		"own":
+			return BoardView.PLAYER_COLORS[e.player]
+	return KIND_COLORS.get(e.kind, KIND_COLORS.info)
