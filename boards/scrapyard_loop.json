@@ -1,5 +1,6 @@
 {
-  "name": "Scrapyard Loop",
+  "name": "Sea Pirates",
+  "theme": "sea",
   "goal": 8000,
   "start_cash": 1500,
   "base_salary": 200,

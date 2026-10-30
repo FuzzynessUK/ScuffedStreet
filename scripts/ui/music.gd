@@ -20,7 +20,7 @@ const DUCK_DB := 10.0  # how far the music dips under a fanfare
 const TAIL := 3.0  # seconds of ringing and reverb kept after the last note
 const PEAK := 0.9  # every clip is scaled to peak here
 const CACHE_DIR := "user://music_cache"
-const SOUND_VERSION := 11
+const SOUND_VERSION := 12
 ## The whole-block fanfare: a snare roll, then one rising note per building
 ## as its roof goes on (BoardView.whole_block timing), then a held chord.
 const FANFARE_LEAD_IN := 0.5

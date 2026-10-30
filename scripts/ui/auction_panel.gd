@@ -145,7 +145,7 @@ func _build_stage(col: VBoxContainer) -> void:
 	var px_per_m := STAGE_HEIGHT / STAGE_METRES
 	for i in 4:
 		var fig := Character.new()
-		fig.setup(BoardView.PLAYER_COLORS[i])
+		fig.setup(BoardView.PLAYER_COLORS[i])  # its look is set per game (run)
 		var x_px := (i - 1.5) * (COLUMN + GAP)
 		fig.position = Vector3(x_px / px_per_m, 0, 0)
 		fig.scale = Vector3.ONE * 1.25
@@ -282,6 +282,16 @@ func _process(delta: float) -> void:
 ## -1, price]. The caller settles it (Auction.settle) and hides the panel.
 func run(g: GameState, id: int, seller: int) -> Array:
 	_game = g
+	for i in mini(_figures.size(), g.players.size()):  # dressed as the players' characters
+		if _figures[i].get_meta("look", "") != g.players[i].character:
+			var old := _figures[i]
+			var fig := Character.new()
+			fig.setup(BoardView.PLAYER_COLORS[i], g.players[i].character)
+			fig.set_meta("look", g.players[i].character)
+			fig.transform = old.transform
+			old.add_sibling(fig)
+			old.queue_free()
+			_figures[i] = fig
 	_lot = id
 	_seller = seller
 	_bid = 0

@@ -43,6 +43,10 @@ const SETUPS := [
 
 const GOALS := [8000, 10000, 15000, 20000, 30000]  # net worth goals offered on the home menu
 const BLOCK_SHOW := 2.8  # seconds the camera stays on a block just completed
+const BLOCK_FOCUS := 3.0  # seconds on a block someone now holds two or more lots of
+const MAX_BLOCK_LOTS := 5  # the Bond Market's lot table always has room for this many
+const MARKET_LOTS_WIDTH := 640
+const MARKET_LOT_CELL := 92  # a lot column's width in the Bond Market
 const KIND_COLORS := {
 	"info": Color("#c8c8d0"), "gain": Color("#5be37a"), "loss": Color("#ff6464"),
 	"win": Color("#ffd84a"),
@@ -55,6 +59,13 @@ var game := GameState.new()
 var board_view: BoardView
 var banner: Label
 var turn_label: Label  # "X's turn!" in the middle of the board
+var log_button: Button
+var character_select: CharacterSelect
+var _log_hidden := false
+var _market_open := false  # bond trades in the market go to the log as one line when it closes
+var _held_in_block := {}  # "player|block" -> lots held, to spot a block growing
+var _bond_seen := {}  # block -> bond price at the last refresh
+var _focus_shown := false
 var board_map: Minimap  # the board in the bottom-left corner, shown all through play
 var players_label: RichTextLabel
 var prompt_label: Label
@@ -179,8 +190,9 @@ func _ready() -> void:
 
 ## The pause box Escape brings up: Keep playing, Main Menu (only during a
 ## game) and Quit, the sound options (music and sound effects each on or off
-## with a volume slider) and the camera option (always zoomed out); Settings
-## saves them as they change. While it is up the game stands still (time scale 0, so
+## with a volume slider), the camera option (always zoomed out) and the board
+## background (the board's own theme, or any Scenery theme); Settings saves
+## them as they change. While it is up the game stands still (time scale 0, so
 ## every wait, tween and CPU move holds) and the board can't be clicked.
 func _build_pause(parent: Control) -> void:
 	pause_panel = Control.new()
@@ -229,6 +241,18 @@ func _build_pause(parent: Control) -> void:
 	col.add_child(sound)
 	col.add_child(_sound_row("Music", "music"))
 	col.add_child(_sound_row("Sound effects", "sfx"))
+	var sound_switches := HBoxContainer.new()
+	sound_switches.add_child(_switch("Dice sounds", "dice_sound", func(_on): pass))
+	sound_switches.add_child(_switch("Movement sounds", "step_sound", func(_on): pass))
+	col.add_child(sound_switches)
+	var speed := Label.new()
+	speed.text = "Speed"
+	speed.add_theme_font_size_override("font_size", 20)
+	col.add_child(speed)
+	var speed_switches := HBoxContainer.new()
+	speed_switches.add_child(_switch("Faster dice", "fast_dice", func(on): board_view.dice_speed = 2.0 if on else 1.0))
+	speed_switches.add_child(_switch("Faster walking", "fast_walk", func(on): board_view.walk_speed = 2.0 if on else 1.0))
+	col.add_child(speed_switches)
 	var camera := Label.new()
 	camera.text = "Camera"
 	camera.add_theme_font_size_override("font_size", 20)
@@ -240,6 +264,35 @@ func _build_pause(parent: Control) -> void:
 		Settings.set_value("zoomed_out", on)
 		board_view.always_overview = on)
 	col.add_child(zoomed)
+	var backdrop := HBoxContainer.new()
+	backdrop.add_theme_constant_override("separation", 10)
+	var backdrop_label := Label.new()
+	backdrop_label.text = "Board background"
+	backdrop.add_child(backdrop_label)
+	var themes := OptionButton.new()
+	var keys := ["auto"] + Scenery.THEMES
+	for key in keys:
+		themes.add_item("The board's own" if key == "auto" else Scenery.NAMES[key])
+	themes.selected = maxi(0, keys.find(Settings.get_value("theme")))
+	themes.item_selected.connect(func(i: int):
+		Settings.set_value("theme", keys[i])
+		board_view.set_theme(keys[i]))
+	themes.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	backdrop.add_child(themes)
+	col.add_child(backdrop)
+
+
+## A switch for the on/off option `key` (Settings), calling `changed` with the
+## new value as well as saving it.
+func _switch(title: String, key: String, changed: Callable) -> CheckButton:
+	var b := CheckButton.new()
+	b.text = title
+	b.button_pressed = Settings.get_value(key)
+	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	b.toggled.connect(func(on: bool):
+		Settings.set_value(key, on)
+		changed.call(on))
+	return b
 
 
 ## One sound option: an on/off switch, a volume slider (greyed while off) and
@@ -317,9 +370,13 @@ func _build_ui() -> void:
 	board_view = BoardView.new()
 	viewport.add_child(board_view)
 	board_view.always_overview = Settings.get_value("zoomed_out")
+	board_view.walk_speed = 2.0 if Settings.get_value("fast_walk") else 1.0
+	board_view.dice_speed = 2.0 if Settings.get_value("fast_dice") else 1.0
+	board_view.theme = Settings.get_value("theme")
 	board_view.block_hit.connect(func(): sfx.play("dice_hit"))
 	board_view.block_bounce.connect(func(): sfx.play("dice_bounce"))
 	board_view.block_landed.connect(func(): sfx.play("dice_land"))
+	board_view.thunder.connect(func(): sfx.play("thunder"))
 
 	banner = Label.new()
 	banner.set_anchors_preset(Control.PRESET_TOP_WIDE)
@@ -371,9 +428,18 @@ func _build_ui() -> void:
 	auction_panel = AuctionPanel.new()
 	overlays.add_child(auction_panel)
 	_build_lot_panel(overlays)
+	character_select = CharacterSelect.new()
+	overlays.add_child(character_select)
 
 	var panel := PanelContainer.new()
 	panel.custom_minimum_size = Vector2(400, 0)
+	var side_bg := StyleBoxFlat.new()
+	side_bg.bg_color = Color("#2d2d33")
+	side_bg.content_margin_top = 14  # the top line never touches the edge
+	side_bg.content_margin_left = 8
+	side_bg.content_margin_right = 8
+	side_bg.content_margin_bottom = 8
+	panel.add_theme_stylebox_override("panel", side_bg)
 	row.add_child(panel)
 	var col := VBoxContainer.new()
 	col.add_theme_constant_override("separation", 8)
@@ -412,6 +478,12 @@ func _build_ui() -> void:
 	props_box.add_theme_constant_override("separation", 2)
 	props_scroll.add_child(props_box)
 
+	log_button = Button.new()  # shows or hides the log (also L)
+	log_button.text = "Hide log"
+	log_button.tooltip_text = "Shortcut: L"
+	log_button.focus_mode = Control.FOCUS_NONE
+	log_button.pressed.connect(_toggle_log)
+	col.add_child(log_button)
 	log_box = RichTextLabel.new()
 	log_box.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	log_box.scroll_following = true
@@ -499,8 +571,30 @@ func _start_menu() -> void:
 		else:
 			_test_lab()
 		return
-	_new_game(choice)
+	var looks := await _choose_characters(choice)
+	_new_game(choice, looks)
 	_run()
+
+
+## Character select: each human in turn picks a character (CharacterSelect
+## shows them all lined up, turning); the CPUs then get random ones from
+## those left. Returns each player's look, in seat order.
+func _choose_characters(cpu: Array) -> Array:
+	var looks := []
+	looks.resize(cpu.size())
+	var left: Array = Character.LOOK_ORDER.duplicate()
+	var human := 0
+	for seat in cpu.size():
+		if cpu[seat]:
+			continue
+		human += 1
+		looks[seat] = await character_select.pick("Player %d" % human, BoardView.PLAYER_COLORS[seat], left)
+		left.erase(looks[seat])
+	left.shuffle()
+	for seat in cpu.size():
+		if looks[seat] == null:
+			looks[seat] = left.pop_back()
+	return looks
 
 
 ## Every board in the boards folder, by name: [[name, path], ...].
@@ -523,8 +617,7 @@ func _pick_board() -> void:
 	var choices := []
 	for entry in boards:
 		var b: Board = entry[2]
-		choices.append(["%s — %d spaces, %d lots" % [b.name, b.spaces.size(),
-				b.lot_ids().size()], entry[1]])
+		choices.append([b.name, entry[1]])
 	choices.append(["Back", ""])
 	_preview_board(_board_path)
 	_ask_hover = func(path): if path != "": _preview_board(path)
@@ -546,7 +639,7 @@ func _preview_board(path: String) -> void:
 
 
 ## Sets up a fresh game on the board; `cpu[i]` says whether seat i is a CPU.
-func _new_game(cpu: Array) -> void:
+func _new_game(cpu: Array, looks: Array = []) -> void:
 	var names := []
 	var humans := 0
 	for i in cpu.size():
@@ -556,6 +649,11 @@ func _new_game(cpu: Array) -> void:
 			humans += 1
 			names.append("Player %d" % humans)
 	game.setup(Board.load_file(_board_path), names, cpu)
+	if looks.is_empty():  # the Test Lab, Watch: everyone a different one at random
+		looks = Character.LOOK_ORDER.duplicate()
+		looks.shuffle()
+	for p in game.players:
+		p.character = looks[p.index % looks.size()]
 	game.board.goal = _goal
 	game.defer_debts = true  # humans pick which bonds to sell (_settle_debts)
 	board_view.build(game)
@@ -960,7 +1058,7 @@ func _move_and_land(p: PlayerState, prompt: String) -> void:
 			_refresh()
 			_show_space_info(p.position)
 			await _hold_for_shows()
-			await _wait(STEP_DELAY)
+			await _wait(STEP_DELAY / (2.0 if Settings.get_value("fast_walk") else 1.0))
 	else:
 		await _plan_route(p)
 	if game.game_over:
@@ -1111,6 +1209,11 @@ func _input(event: InputEvent) -> void:
 ## d-pad) step while planning a route; the arrow back the way you came,
 ## Backspace or the pad's B undo a step; Enter confirms "Go here?".
 func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_L \
+			and not pause_panel.visible:
+		get_viewport().set_input_as_handled()
+		_toggle_log()
+		return
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
 		get_viewport().set_input_as_handled()
 		_set_paused(not pause_panel.visible)
@@ -1731,7 +1834,7 @@ func _toggle_map() -> void:
 	_map_open = not _map_open
 	map_button.text = "Close Map" if _map_open else VIEW_MAP
 	props_scroll.visible = _map_open
-	log_box.visible = not _map_open
+	log_box.visible = not _map_open and not _log_hidden
 	board_view.hold_overview = _map_open
 	board_map.visible = not _map_open
 	overlays.visible = not _map_open
@@ -1790,8 +1893,12 @@ func _market(p: PlayerState, prompt: String, owing := false, sell_only := false,
 	if p.is_cpu:
 		if view_only:
 			return
+		var before := {"cash": p.cash, "bonds": p.bonds.duplicate()}
+		_market_open = true
 		Cpu.trade(game, p)
 		_refresh()
+		_market_open = false
+		_log_market(p, before)
 		await _hold_for_shows()
 		return
 	prompt_label.text = prompt
@@ -1809,6 +1916,8 @@ func _market(p: PlayerState, prompt: String, owing := false, sell_only := false,
 		_market_block = p.bonds.keys()[0]
 	lot_panel.visible = false
 	market_panel.visible = true
+	_market_open = true
+	var before := {"cash": p.cash, "bonds": p.bonds.duplicate()}
 	while true:
 		_fill_market(p)
 		var act: Array = await market_action
@@ -1826,9 +1935,34 @@ func _market(p: PlayerState, prompt: String, owing := false, sell_only := false,
 					break
 		_refresh()
 	market_panel.visible = false
+	_market_open = false
+	_log_market(p, before)
 	_market_owing = false
 	_market_sell_only = false
 	_market_view_only = false
+
+
+## One log line for a visit to the Bond Market, once it closes: what p bought
+## and sold, block by block, and the cash it came to (nothing if no trade).
+func _log_market(p: PlayerState, before: Dictionary) -> void:
+	var parts := PackedStringArray()
+	for block in game.board.blocks:
+		var d: int = p.bonds_in(block) - before.bonds.get(block, 0)
+		if d != 0:
+			parts.append("%+d %s" % [d, game.board.blocks[block].name])
+	if parts.is_empty():
+		return
+	var cash: int = p.cash - before.cash
+	game._note("%s's bond trades: %s (%s%d G)" % [p.name, ", ".join(parts), "+" if cash >= 0 else "", cash],
+			"gain" if cash >= 0 else "own", p.index)
+	_refresh()
+
+
+## Shows or hides the log (the button under the side panel, or L).
+func _toggle_log() -> void:
+	_log_hidden = not _log_hidden
+	log_box.visible = not _log_hidden and not _map_open
+	log_button.text = "Show log" if _log_hidden else "Hide log"
 
 
 ## The Bond Bump / Bond Slump reel, shown in the middle of the board.
@@ -2124,6 +2258,7 @@ func _build_market(parent: Control) -> void:
 	map_row.add_child(market_map)
 	var lots_col := VBoxContainer.new()
 	lots_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	lots_col.custom_minimum_size = Vector2(MARKET_LOTS_WIDTH, 0)  # the same size for every block
 	map_row.add_child(lots_col)
 	market_lots_title = Label.new()
 	market_lots_title.add_theme_font_size_override("font_size", 18)
@@ -2294,13 +2429,14 @@ func _map_block(block: String) -> void:
 		market_lots.remove_child(c)
 		c.queue_free()
 	var lots := game.board.lots_in_block(block)
-	market_lots.columns = lots.size() + 1
+	market_lots.columns = MAX_BLOCK_LOTS + 1  # always room for the biggest block
 	var grey := Color("#8fb0ab")
 	market_lots.add_child(_cell("", grey, 14))
 	for lot in lots:
 		var owner: int = game.lots[lot].owner
-		market_lots.add_child(_cell(game.space(lot).name,
+		market_lots.add_child(_lot_cell(game.space(lot).name,
 				BoardView.PLAYER_COLORS[owner] if owner >= 0 else Color("#c9c9d2"), 14))
+	_pad_lots(lots.size())
 	for row in ["Owner", "Building", "Lot value", "Rent", "Max capital"]:
 		market_lots.add_child(_cell(row, grey, 14))
 		for lot in lots:
@@ -2320,6 +2456,28 @@ func _map_block(block: String) -> void:
 					var cap := game.max_capital(lot)
 					text = "%d G" % cap if cap > 0 else "Max"
 			market_lots.add_child(_cell(text, Color.WHITE, 14))
+		_pad_lots(lots.size())
+
+
+## A lot name in the Bond Market: a fixed width, cut short if it is long (the
+## whole name shows on hover).
+func _lot_cell(text: String, color: Color, size: int) -> Label:
+	var l := _cell(text, color, size)
+	l.custom_minimum_size = Vector2(MARKET_LOT_CELL, 0)
+	l.clip_text = true
+	l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	l.tooltip_text = text
+	l.mouse_filter = Control.MOUSE_FILTER_PASS
+	return l
+
+
+## Blank cells to the end of a row of the lot table (a block with fewer
+## lots than the biggest), so every block's table is the same size.
+func _pad_lots(shown: int) -> void:
+	for i in MAX_BLOCK_LOTS - shown:
+		var blank := _cell("", Color.WHITE, 14)
+		blank.custom_minimum_size = Vector2(MARKET_LOT_CELL, 0)
+		market_lots.add_child(blank)
 
 
 func _fill_market(p: PlayerState) -> void:
@@ -2471,6 +2629,35 @@ func _check_whole_blocks() -> void:
 			music.fanfare(game.board.lots_in_block(block).size())
 			_block_shown = true
 		_last_whole[block] = owner
+	_check_block_growth()
+
+
+## A player now holds more lots of a block than before, and more than one
+## (but not all: a whole block has its own show): the camera moves in on the
+## block for BLOCK_FOCUS seconds, their houses bounce, and each shows its
+## value and rent, the first the block's new bond price too.
+func _check_block_growth() -> void:
+	for block in game.board.blocks:
+		var ids := game.board.lots_in_block(block)
+		for p in game.players:
+			var key := "%d|%s" % [p.index, block]
+			var held := game.owned_in_block(p.index, block)
+			var was: int = _held_in_block.get(key, held)
+			_held_in_block[key] = held
+			if held > was and held >= 2 and held < ids.size():
+				var owned: Array[int] = []
+				var labels := {}
+				for id in ids:
+					if game.lots[id].owner == p.index:
+						owned.append(id)
+						labels[id] = "%d G · rent %d G" % [game.lot_value(id), game.rent(id)]
+				var bond: int = game.bond_price(block)
+				var old: int = _bond_seen.get(block, bond)
+				labels[owned[0]] = "Bonds %s%d G\n%s" % ["%d → " % old if old != bond else "", bond, labels[owned[0]]]
+				board_view.block_focus(ids, owned, labels, BLOCK_FOCUS)
+				sfx.play("build")
+				_focus_shown = true
+		_bond_seen[block] = game.bond_price(block)
 
 
 ## Lets a PAYDAY celebration or a bond ticker spin play out before moving on.
@@ -2478,6 +2665,9 @@ func _hold_for_shows() -> void:
 	var seconds := 0.0
 	if _payday_shown:
 		seconds = PAYDAY_PAUSE
+	if _focus_shown:
+		seconds = maxf(seconds, BLOCK_FOCUS)
+	_focus_shown = false
 	if _block_shown:
 		seconds = maxf(seconds, BLOCK_SHOW)
 	_block_shown = false
@@ -2624,10 +2814,10 @@ func _draw_players() -> void:
 		if _at_goal(p, pending):  # in reach of the win: a glowing rainbow
 			anyone_at_goal = true
 			net = "[outline_size=8][outline_color=#ffffff66][pulse freq=1.6 color=#ffffffb0 ease=-2.0][rainbow freq=0.6 sat=0.75 val=1.0 speed=1.2][b]★ %s ★[/b][/rainbow][/pulse][/outline_color][/outline_size]" % net
-		lines.append("%s[color=#%s]■[/color] [b]%s[/b] %s  %s  %s%s" % [
-				mark, col, p.name, pips, cash, net, "  BROKE" if p.broke else ""])
-		lines.append("      [color=#ffd84a]Lv %d[/color]   [color=#9a9aa6]bonds %d   bonds value %d G[/color]%s" % [
-				p.level, bonds, game.bond_worth(p), change])
+		lines.append("%s[color=#%s]■[/color] [b]%s[/b] [color=#9a9aa6]%s[/color] [color=#ffd84a][b]Lv %d[/b][/color] %s  %s  %s%s" % [
+				mark, col, p.name, Character.LOOKS.get(p.character, {}).get("name", ""), p.level, pips, cash, net, "  BROKE" if p.broke else ""])
+		lines.append("      [color=#9a9aa6]bonds %d   bonds value %d G[/color]%s" % [
+				bonds, game.bond_worth(p), change])
 	players_label.text = "\n".join(lines)
 	music.intense = anyone_at_goal and not game.game_over
 
@@ -2652,6 +2842,9 @@ func _refresh() -> void:
 		var e: Dictionary = game.events[_shown_events]
 		if e.has("sound"):
 			sounds[e.sound] = true
+		if _market_open and e.get("sound", "") in ["bond_buy", "bond_sell"]:
+			_shown_events += 1  # summed up in one line when the market closes
+			continue
 		var color := _event_color(e)
 		log_box.push_color(color)
 		log_box.add_text(e.text + "\n")

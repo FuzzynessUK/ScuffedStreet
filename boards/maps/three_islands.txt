@@ -1,7 +1,8 @@
 # Three little island loops joined by bridges; the bridges meet at the Star.
-name: Three Islands
+name: Lava Islands
 goal: 8000
 name_offset: 12
+theme: volcano
 map:
 a a S a . . . . . b b H b
 D . . a P d * d P b . . R

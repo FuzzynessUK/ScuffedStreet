@@ -1,8 +1,9 @@
 # Two loops joined at a crossing in the middle. Your route choice decides
 # which suits you pick up: two are on each loop.
-name: Figure Eight
+name: Rainy Clouds
 goal: 8000
 name_offset: 0
+theme: storm
 map:
 a a S a P . b b H b b
 ? . . . a . X . . . P

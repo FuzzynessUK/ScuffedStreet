@@ -56,13 +56,22 @@ salary) are used freely; specific mechanics are not copied from any game.
 - Keyboard: the arrow keys (or d-pad) step in that direction on screen; the
   arrow back the way you came, Backspace (or the pad's B) undo a step;
   Enter or Space confirms "Go here?" (or takes the only way forward).
+- **The side panel** sits a little down from the top so its first line always
+  fits; each player's level shows by their name. **Hide log / Show log**
+  (or L) folds the log away. Trades in the Bond Market go to the log as one
+  line when the market closes (what was bought and sold, block by block, and
+  the cash), not a line per trade. The market window keeps the same size
+  whichever block is shown.
 - **Escape** at any time brings up the pause box: Keep playing, Main Menu
   (during a game; back to the home screen, keeping the board and goal picked)
   and Quit (closes the game), and the **sound options**: Music and Sound
   effects, each switched on or off with a volume slider (0–100%), and the
   **camera option** Always zoomed out (the whole board all the time instead
   of following the player; short shows like the whole-block close-up still
-  play). They take effect at once and are saved in `user://settings.cfg`
+  play), and **Board background** (the board's own theme, or any of them;
+  see Backdrops), **Dice sounds** and **Movement sounds** (on/off), and
+  **Speed**: Faster dice (the dice block bounces and settles twice as fast)
+  and Faster walking (figures walk twice as fast). They take effect at once and are saved in `user://settings.cfg`
   (`scripts/ui/settings.gd`; music plays on a "Music" audio bus, effects on
   "SFX"). While the box is up everything stands still, CPU turns included;
   Escape again closes it.
@@ -150,6 +159,11 @@ Rent is multiplied by how much of the block the owner holds:
 
 (If "at least half" and "all but one" are the same count, the higher applies.)
 
+**Growing a block.** Whenever a player comes to hold two or more lots of a
+block (but not all of it), the camera moves in on the block for 3 seconds:
+their houses bounce up a little bigger one after another, each shows its value
+and rent, and the first shows the block's bond price (old → new).
+
 **Whole block.** Owning every lot in a block raises each lot's value by 25%
 (so its bond price jumps) and doubles how much each lot takes per turn. The
 moment a block comes into one player's hands (a purchase, buyout, auction,
@@ -158,6 +172,16 @@ one: each spins round and its roof pops back on in gold with a burst of sparks, 
 a WHOLE BLOCK! banner, to a rising fanfare (one note per building, then a
 held chord; the music dips under it). The gold roofs stay while the block is
 whole.
+
+**Characters.** After choosing a game on the home menu, each human player in
+turn picks a character on a stage where all of them stand turning, in that
+player's colour (`scripts/ui/character_select.gd`); ones already taken are
+dimmed. CPUs get random ones from those left (in Watch and the Test Lab
+everyone gets one at random). Eight placeholders for now, told apart by build,
+skin and headwear (`Character.LOOKS`): Max (cap), Lulu (hair bow), Duke (top
+hat), Rosa (bobble hat), Tex (cowboy hat), Zip (cycle helmet), Chef Bo (chef's
+hat) and Gus (crown). The side panel shows each player's character by their
+name.
 
 **Corner map.** All through a game a small, slightly see-through map of the board sits in
 the bottom-left corner of the board view (`scripts/ui/minimap.gd`, as an overlay): every
@@ -191,7 +215,9 @@ glass wing with a SHOPS sign and a terrace, a lamp post with banners in the
 owner's colour) that grows taller each time it is expanded. The Depot is
 drawn as the BANK: a grand columned bank with a dome and a gold money bag on
 top, a red carpet to its door and BANK lettered on the tile. The Wildcard
-space is a green ? on purple. The Star space is a flat smiling star on squares of blue and green.
+space is a green ? on purple. The Star space is a flat smiling star on squares of blue and green; the Moon
+likewise a flat, sleepy crescent moon (closed eye, little smile, a few small
+stars) on squares glowing from night blue to soft purple, in a white border.
 The Arcade is an upright arcade cabinet (lit marquee, a glowing maze-and-dots
 screen, joystick and buttons, coin door), nearly square on, on a dark grey
 arcade-room floor inside a white border.
@@ -248,8 +274,8 @@ Landing on a rival's lot, after paying rent you may **buy it out** for
 | Star     | Interest (one per board, ★): until your next turn you get a **20% commission**, paid by the bank, on every profit the other players make: rent they collect, PAYDAY salaries, bond dividends, Scrap Heap combo bonuses, card gains and minigame prizes (not sales or trades). They keep all of theirs. Shows as "Star 20%" on the stats. |
 | Moon     | Take a break (one per board, ☾): all your lots are **closed** until your next turn, so they charge no rent. A brief sunset sweeps over the board (orange, then dusky purple, then back), and each of your lots shows a red "✕ CLOSED" sign until it reopens. Shows as "☾ closed" on the stats. |
 | Plot     | A building plot (three per board): build on it, then rivals pay and you get a perk (see Building plots). |
-| Workshop | Invest in any of your lots at 80% of the price. (Not on Scrapyard Loop now: its Workshop became a plot.) |
-| Toll     | Pay 8% of your cash to the bank. (Not on Scrapyard Loop now: its Toll became a plot.) |
+| Workshop | Invest in any of your lots at 80% of the price. (Not on Sea Pirates now: its Workshop became a plot.) |
+| Toll     | Pay 8% of your cash to the bank. (Not on Sea Pirates now: its Toll became a plot.) |
 | Detour   | Warp to the paired Detour space; your move ends there. |
 | Junction | No effect; a branch point (any space may branch, this one is just empty). |
 
@@ -441,17 +467,55 @@ winner's prize.
 
 The home menu has **Choose a board**: every board in `boards/` with its
 size; hovering a choice shows that board behind the menu, and picking it
-makes it the board for new games (and the Test Lab). Besides Scrapyard Loop
-there are Figure Eight, Three Islands, Spiral Market, Crossroads and Long
-Street, drawn as text maps (`boards/maps/`, see `boards/README.md`) so more
+makes it the board for new games (and the Test Lab). Besides Sea Pirates
+there are Rainy Clouds, Lava Islands, Spiral Market, Crossroads and Castle
+Fort, drawn as text maps (`boards/maps/`, see `boards/README.md`) so more
 levels are quick to add. Those boards are two-way: you choose a direction
 and turn round at dead ends. Boards are JSON files (format in
 `boards/README.md`), so new boards need no code. All boards and art are
 original.
 
-Every board sits on a very basic 3D golf course for now (filler scenery):
-rough and mown grass, fairways to flagged greens, bunkers, a pond and trees,
-under a blue sky.
+**Turtle Islands** (`tools/make_3d_boards.pl`, over the Calm Sea: the Pirate Sea
+with still water, fish leaping out of it now and then instead of seagulls) is
+round throughout: a circle of 16 spaces on a round sandy beach island with the
+Bank and palms, and round it four big brown-shelled sea turtles, each carrying
+a circle of 8 spaces (its warp pad facing the beach), each shell wide enough to
+carry them cleanly; the island and turtles are faded a little towards the sea
+so the spaces stand out;
+swimming in the water, heads hidden under it and flippers paddling, their
+shells shaded in plates with grooves and growth rings, the spaces on top of
+their shells, each at its own height, joined only by warp pads; each turtle
+holds one suit, so a PAYDAY means hopping round them all. **Lost Bottle**
+(same tool, in space) wraps the whole board round a giant glass bottle (just the glass, and no shadows on this board): two rings of spaces round the glass, joined by ladders up the
+front and back; spaces on the far side show through the glass. A space's
+`face` can be a direction (`[x, y, z]`, its top pointing outwards from the
+glass), and a board can set its own `camera` direction (the bottle is seen
+more from the side).
+
+**Sky Station** is a 3D board (built by `tools/make_sky_station.pl`): a
+main deck with the Bank, a tower whose spaces climb straight up its face
+(players walk up it standing on the wall), a loop on a high island behind
+it, and a side island floating off to the left reached only by **warp
+pads** (`warp` spaces: stepping from one pad to its partner is one step, a
+flash and you are across; landing on one does nothing). A space can give a
+world position `at` and a facing `face` (`up` or `front`: on a wall facing
+the camera), and a board can list `props` (floating `island`s, `tower`s)
+to stand on (only towers are drawn; the island spaces float on their own).
+
+**Backdrops.** The board floats high above a themed 3D world
+(`scripts/ui/scenery.gd`), which shows between and round the tiles, gently
+animated but never distracting. Surfaces carry soft natural textures in muted
+colours, with a little depth fog. Nothing in the scenery takes or casts shadows. Each board picks one (`theme` in its JSON);
+the Escape menu's Board background can override it with any of them:
+
+| Theme | What is round and below the board |
+|-------|-----------------------------------|
+| Pirate Sea (Sea Pirates) | a deep blue-green rough sea with big rolling waves just under the board; two big pirate ships with rounded hulls and billowing sails, angled across the board among the tiles, trading cannon fire; seagulls wheeling overhead, a ship sailing far off, a shark fin circling, life rings, a blinking buoy, rocks and barrels |
+| Space (Spiral Market, for now; Sky Station) | twinkling stars, five planets circling slowly below on their own levels, small space rocks tumbling about, meteors streaking past |
+| Lava Dungeon (Lava Islands) | a sea of lava filling the whole view, glowing into a red haze at the horizon, stone pillars and rocky outcrops standing in it, drifting platforms, lava bubbles swelling and popping, embers; the rocks spread over the whole sea |
+| Grand Castle (Castle Fort) | a fortress: massive curtain walls with battlements, square towers with arrow slits, a gatehouse with a portcullis, the keep with a flag, a moat, banners, soldiers patrolling the walls, cannons firing now and then ; catapults flinging stones, barrels, crates and hay in the courtyard; a great army filling the ground outside the back gate, seen over the low back wall: hundreds of soldiers in four coloured companies with an aisle to the drawbridge, knights on horseback, standard bearers, siege cannons and tents; the banners hang still on the gatehouse |
+| Slot-Car Grand Prix (Crossroads) | five slot-car tracks running right across the scene and off the screen at both ends, at three heights so they cross over one another: a main straight under the board with a start gantry, an S-bend in front, two flyovers front to back and a high flyover sweeping across in big S-curves; ten Formula One cars in team colours, each in its slot at its own speed |
+| Storm Clouds (Rainy Clouds) | a dark sky, storm clouds drifting slowly below, the weather turning from rain to hail to snow every 25 s, lightning flickering inside the clouds followed by thunder |
 
 ## Test Lab
 
@@ -485,7 +549,7 @@ Nothing there carries over; going bankrupt or winning just starts it afresh.
 
 ## Building plots
 
-Three empty plots per board (on Scrapyard Loop: the old Toll, the old
+Three empty plots per board (on Sea Pirates: the old Toll, the old
 Workshop, and Winch Tower's spot in Block F). Land on an empty one and you
 **must** build one of these for **200 G** (with cash, or bonds to cover it as
 for a lot; only if even that can't pay does it stay empty). The building is

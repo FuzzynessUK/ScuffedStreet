@@ -3,6 +3,7 @@
 name: Crossroads
 goal: 8000
 name_offset: 36
+theme: racing
 map:
 . . . . . . S . . . . . .
 . . . . . . a . . . . . .

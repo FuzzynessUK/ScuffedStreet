@@ -22,6 +22,7 @@ var creditor := -1       # who the last debt was owed to (player, or -1 the bank
 var reverse_next := false  # Reverse Gear / U-Turn: walk backwards next turn...
 var reverse_move := false  # ...walking backwards this turn
 var reverse_first := false  # the next step turns them round (first of the turn)
+var character := "max"  # the look picked at the start (Character.LOOKS)
 
 
 func bonds_in(block: String) -> int:

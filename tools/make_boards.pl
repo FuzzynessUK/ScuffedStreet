@@ -4,7 +4,8 @@
 #   perl tools/make_boards.pl
 #
 # A map file has "key: value" lines (name, goal, start_cash, base_salary,
-# relay_bonus, and optionally names: a comma-separated list of lot names),
+# relay_bonus, theme (the backdrop: sea, space, volcano, castle, racing or
+# storm), and optionally names: a comma-separated list of lot names),
 # then "map:" and the board drawn one cell per space, cells separated by
 # spaces. Spaces next to each other (left/right/up/down) are linked both ways,
 # so you can walk either way and turn round at a dead end.
@@ -151,6 +152,7 @@ sub build {
 		start_cash => $meta{start_cash} // 1500,
 		base_salary => $meta{base_salary} // 200,
 		relay_bonus => $meta{relay_bonus} // 120,
+		theme => $meta{theme} // "sea",
 		blocks => \%blocks,
 		spaces => \@spaces,
 	};
@@ -163,6 +165,7 @@ sub to_json {
 	my ($b) = @_;
 	my @lines = ("{");
 	push @lines, "  \"name\": " . q_str($b->{name}) . ",";
+	push @lines, "  \"theme\": " . q_str($b->{theme}) . ",";
 	push @lines, "  \"$_\": $b->{$_}," for qw(goal start_cash base_salary relay_bonus);
 	push @lines, "  \"blocks\": {";
 	my @ids = sort keys %{ $b->{blocks} };

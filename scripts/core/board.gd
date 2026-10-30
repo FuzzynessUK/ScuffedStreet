@@ -4,15 +4,21 @@ extends RefCounted
 
 const TYPES := ["depot", "relay", "lot", "market", "wildcard", "workshop",
 		"toll", "detour", "junction", "dice", "arcade",
-		"interest", "break", "plot"]
+		"interest", "break", "plot", "warp"]
 
 var name := ""
 var goal := 10000
 var start_cash := 1500
 var base_salary := 200
 var relay_bonus := 150
+var theme := "sea"  # the backdrop round the board (Scenery)
 var blocks := {}  # block id -> {name: String, color: Color}
 var spaces: Array[Dictionary] = []
+## Scenery a 3D board stands on: {kind: "island" | "tower", at: [x, y, z],
+## size: [...], depth}, in tiles (BoardView draws them).
+var props: Array = []
+## Which way the camera looks at the board from, [x, y, z] (optional).
+var camera: Array = []
 var depot := -1
 
 
@@ -36,6 +42,7 @@ static func load_file(path: String) -> Board:
 ## Fills the board from parsed JSON. Returns "" or the first problem found.
 func load_data(data: Dictionary) -> String:
 	name = str(data.get("name", "Untitled"))
+	theme = str(data.get("theme", theme))
 	goal = int(data.get("goal", goal))
 	start_cash = int(data.get("start_cash", start_cash))
 	base_salary = int(data.get("base_salary", base_salary))
@@ -49,6 +56,8 @@ func load_data(data: Dictionary) -> String:
 			"color": Color.html(str(blk.get("color", "#888888"))),
 		}
 
+	props = data.get("props", [])
+	camera = data.get("camera", [])
 	var raw_spaces: Array = data.get("spaces", [])
 	if raw_spaces.is_empty():
 		return "no spaces"
@@ -74,6 +83,12 @@ func load_data(data: Dictionary) -> String:
 			"pair": int(s.get("pair", -1)),
 			"mark": str(s.get("mark", "")),
 			"color": Color.html(str(s.get("color", "#888888"))),
+			# A 3D board: where the space is in the world (in tiles: across, up,
+			# towards the camera; else x, 0, y) and which way it faces ("up", or
+			# "front": standing on a wall facing the camera, or [x, y, z]: the way
+			# its top points, e.g. outwards on the side of a bottle).
+			"at": s.get("at", []),
+			"face": s.get("face", "up"),  # "up", "front", or a direction [x, y, z]
 		}
 		if type == "lot":
 			if not blocks.has(space.block):

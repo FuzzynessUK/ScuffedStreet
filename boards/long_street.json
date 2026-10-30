@@ -1,5 +1,6 @@
 {
-  "name": "Long Street",
+  "name": "Castle Fort",
+  "theme": "castle",
   "goal": 8000,
   "start_cash": 1500,
   "base_salary": 200,

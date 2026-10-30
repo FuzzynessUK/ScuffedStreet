@@ -1,5 +1,6 @@
 {
-  "name": "Three Islands",
+  "name": "Lava Islands",
+  "theme": "volcano",
   "goal": 8000,
   "start_cash": 1500,
   "base_salary": 200,

@@ -3,6 +3,7 @@
 name: Spiral Market
 goal: 8000
 name_offset: 24
+theme: space
 map:
 a a S a * b b R b
 C . . . ? . . . b

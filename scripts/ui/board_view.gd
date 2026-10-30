@@ -30,6 +30,15 @@ const RELAY_FRAME := Color("#f3ecd9")  # the suit spaces' cream-white border
 const WILDCARD_MARK := Color("#5ee05a")  # the Card space's green ?
 const DICE_GREEN := Color("#22b84a")
 const STAR_SQUARES := [Color("#1f6fb8"), Color("#1f9a5a"), Color("#4cc878")]  # blue edge, green middle
+const MOON_SQUARES := [Color("#1c2566"), Color("#38409c"), Color("#6a62c8")]  # night blue to soft purple
+const MOON_YELLOW := Color("#fff2b0")
+const WARP_SQUARES := [Color("#3a2a8a"), Color("#5a4ac8"), Color("#9a8aff")]
+const WARP_GLOW := Color("#7ad8ff")
+## Turtle Islands's beach and turtles are faded this much towards FADE_TO, so the
+## spaces on them stand out.
+const PROP_FADE := 0.25
+const FADE_TO := Color("#a8c4cc")
+const MOON_RIM := Color("#d9a83a")
 const STAR_YELLOW := Color("#ffd84a")
 const STAR_RIM := Color("#d9841a")
 const STAR_THICK := 0.02
@@ -50,6 +59,7 @@ const STONE := Color("#9a958c")
 const BANK_STONE := Color("#f1e6cc")
 const BANK_GOLD := Color("#f2bf2a")
 const BANK_CARPET := Color("#c8283c")
+const BANK_SCALE := 1.15  # the Bank on its tile (any bigger crowds the players)
 const WOOD := Color("#a0703c")
 const HOUSE_WINDOW := Color("#fff2b0")
 const HOUSE_DOOR := Color("#6b4a2e")
@@ -72,16 +82,20 @@ var highlight: Array[int] = []  # spaces offered as a branch choice
 var zoom_for_highlight := true  # pull back to the whole board while highlighting
 var hold_overview := false  # whole board until switched off (View Map)
 var always_overview := false  # the player's option: never follow, show the whole board
+var walk_speed := 1.0  # Faster walking: 2
+var dice_speed := 1.0  # Faster dice: 2
 
 var _camera: Camera3D
 var _root: Node3D
 var _tiles := {}                     # space id -> {mesh, base, sub, building}
 var _tokens: Array[Node3D] = []      # holders; tweened between spaces
 var _token_space: Array[int] = []
+var _token_from := {}  # player index -> the space its figure last went to
 var _ring: MeshInstance3D
 var _arrows: Array[Node3D] = []
 var _popups: Array[Label3D] = []
 var _spinners: Array[Node3D] = []  # suit symbols swaying above the Relays
+var _paddles: Array = []  # [flipper, phase, front?]: turtles' flippers, paddling
 var _time := 0.0
 var _center := Vector3.ZERO  # middle of the board
 var _preview := {}  # player index -> space shown while planning a route
@@ -93,6 +107,10 @@ var _focus_look := Vector3.ZERO
 var _focus_until := 0.0
 var _cam_look := Vector3.ZERO
 var _env: Environment  # tinted by sunset()
+var theme := "auto"  # the backdrop (Scenery.THEMES), or "auto" for the board's own
+var _scenery: Scenery
+var _lo := Vector3.ZERO  # the board's extent
+var _hi := Vector3.ZERO
 var _sun: DirectionalLight3D
 var _block: Node3D  # the dice block (show_block / hit_block)
 var _block_mode := ""  # "spin" over a head, "bounce" in front of the camera
@@ -106,6 +124,7 @@ signal block_hit     # a player's fist meets the dice block
 signal block_bounce  # it hits the bottom of the screen
 signal block_landed  # it settles showing the roll
 signal space_clicked(id: int)  # a click on a space on the board (Warp Gate)
+signal thunder  # a thunderclap in the backdrop (Storm Clouds)
 
 
 func _ready() -> void:
@@ -148,8 +167,10 @@ func build(g: GameState) -> void:
 	_preview.clear()
 	_tokens.clear()
 	_token_space.clear()
+	_token_from.clear()
 	_arrows.clear()
 	_spinners.clear()
+	_paddles.clear()
 	highlight = []
 	if g == null:
 		return
@@ -159,22 +180,23 @@ func build(g: GameState) -> void:
 	for s in g.board.spaces:
 		lo = lo.min(_pos(s.id))
 		hi = hi.max(_pos(s.id))
-	var table := _box(Vector3(hi.x - lo.x + 2.0, 0.1, hi.z - lo.z + 2.0), Color("#5fae48"))  # mown grass
-	_center = (lo + hi) / 2
-	table.position = (lo + hi) / 2 - Vector3(0, 0.05, 0)
-	_root.add_child(table)
-	_build_golf_course(lo, hi)
+	_center = (lo + hi) / 2  # the board floats; the theme's scenery lies below it
+	_lo = lo
+	_hi = hi
+	_build_scenery()
 
 	for s in g.board.spaces:
 		for n in s.next:
-			_add_link(_pos(s.id), _pos(n))
+			if not (s.type == "warp" and g.board.spaces[n].type == "warp"):  # warps jump, no path
+				_add_link(_pos(s.id) + _up(s.id) * 0.02, _pos(n) + _up(n) * 0.02)
+	_build_props()
 	for s in g.board.spaces:
 		_add_space(s)
 
 	for p in g.players:
 		var figure := Character.new()
 		_root.add_child(figure)
-		figure.setup(PLAYER_COLORS[p.index])
+		figure.setup(PLAYER_COLORS[p.index], p.character)
 		figure.scale = Vector3.ONE * FIGURE_SCALE
 		_tokens.append(figure)
 		_token_space.append(-1)
@@ -200,7 +222,7 @@ func build(g: GameState) -> void:
 			for s in g.board.spaces:
 				if s.type == parts[0]:
 					_focus_look = _pos(s.id) + Vector3(0, 0.3, 0)
-					_focus_pos = _focus_look + CAMERA_DIR.normalized() * (float(parts[1]) if parts.size() > 1 else 2.6)
+					_focus_pos = _focus_look + _cam_dir() * (float(parts[1]) if parts.size() > 1 else 2.6)
 					_focus_until = INF
 					break
 
@@ -273,7 +295,7 @@ func sync(instant := false) -> void:
 	_arrows.clear()
 	for id in highlight:
 		var arrow := _label("▼", 96, Color.WHITE, true)
-		arrow.position = _pos(id) + Vector3(0, 1.0, 0)
+		arrow.position = _pos(id) + _up(id) * 1.0
 		_root.add_child(arrow)
 		_arrows.append(arrow)
 
@@ -285,11 +307,22 @@ func sync(instant := false) -> void:
 		if _token_space[p.index] == shown:
 			continue
 		_token_space[p.index] = shown
-		if instant:
+		var up := _up(shown)
+		var was: int = _token_from.get(p.index, -1)
+		_token_from[p.index] = shown
+		var warped: bool = was >= 0 and game.space(was).type == "warp" and game.space(shown).type == "warp" \
+				and shown in game.space(was).next
+		if instant or warped:
+			if warped:  # a flash at each end of the warp
+				_burst(holder.position + up * 0.4, WARP_GLOW, _root)
+				_burst(target + up * 0.4, WARP_GLOW, _root)
 			holder.position = target
-			holder.rotation.y = 0.0  # face the camera
+			if up.is_equal_approx(Vector3.UP):
+				holder.rotation = Vector3.ZERO  # face the camera
+			else:
+				(holder as Character).stand(up, Vector3.DOWN)
 		else:
-			(holder as Character).walk_to(target, MOVE_TIME)
+			(holder as Character).walk_to(target, MOVE_TIME / walk_speed, up)
 
 
 func popup_at_player(index: int, text: String, color: Color) -> void:
@@ -297,7 +330,7 @@ func popup_at_player(index: int, text: String, color: Color) -> void:
 
 
 func popup_at_space(id: int, text: String, color: Color) -> void:
-	_popup(_pos(id) + Vector3(0, 0.9, 0), text, color)
+	_popup(_pos(id) + _up(id) * 0.9, text, color)
 
 
 ## Shows player `index` standing on `id` while they plan a route (the game
@@ -351,7 +384,7 @@ func hit_block(index: int, result: int) -> void:
 	_block_vel = Vector3(side * randf_range(0.6, 1.2), 2.4, 0)
 	_block_spin = Vector3(randf_range(7, 11), randf_range(4, 8), randf_range(-6, 6))
 	_block_mode = "bounce"
-	await get_tree().create_timer(BOUNCE_SECONDS).timeout
+	await get_tree().create_timer(BOUNCE_SECONDS / dice_speed).timeout
 	# Settle face on, the roll on its front.
 	_block_mode = ""
 	var faces: Array = _block.get_meta("faces")
@@ -364,7 +397,7 @@ func hit_block(index: int, result: int) -> void:
 	tw.tween_property(_block, "scale", Vector3.ONE * 0.95, 0.35).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	await tw.finished
 	block_landed.emit()
-	await get_tree().create_timer(0.8).timeout
+	await get_tree().create_timer(0.8 / dice_speed).timeout
 	var out := create_tween()
 	out.tween_property(_block, "scale", Vector3.ZERO, 0.2).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
 	await out.finished
@@ -380,7 +413,7 @@ func star_rise(index: int, seconds: float) -> void:
 	holder.scale = Vector3.ONE * 0.15
 	_root.add_child(holder)
 	var star := _smiling_star()
-	star.rotation.x = atan2(CAMERA_DIR.z, CAMERA_DIR.y)  # its face towards the camera
+	star.rotation.x = atan2(_cam_dir().z, _cam_dir().y)  # its face towards the camera
 	holder.add_child(star)
 	var tw := create_tween().set_parallel(true)
 	tw.tween_property(holder, "position:y", holder.position.y + 1.1, seconds).set_ease(Tween.EASE_OUT) \
@@ -467,7 +500,7 @@ func whole_block(ids: Array[int], seconds: float) -> void:
 	var need := maxf(hi.z - lo.z, (hi.x - lo.x) / aspect) + 3.0
 	var dist := maxf(4.5, need * 0.5 / tan(deg_to_rad(_camera.fov * 0.5)))
 	_focus_look = center + Vector3(0, 0.3, 0)
-	_focus_pos = _focus_look + CAMERA_DIR.normalized() * dist
+	_focus_pos = _focus_look + _cam_dir() * dist
 	_focus_until = _time + seconds
 	var owner: int = game.lots[ids[0]].owner
 	var color: Color = PLAYER_COLORS[owner] if owner >= 0 else ROOF_COLOR
@@ -500,6 +533,54 @@ func whole_block(ids: Array[int], seconds: float) -> void:
 	tw.tween_callback(label.queue_free)
 
 
+## A player owns more than one lot of a block: the camera moves in on the
+## block for `seconds`, the houses of `owned` bounce up a little bigger, and
+## each shows `labels` (lot id -> text: its new value and rent; the block's
+## bond price on the first) over it.
+func block_focus(ids: Array[int], owned: Array[int], labels: Dictionary, seconds: float) -> void:
+	if ids.is_empty():
+		return
+	var lo := Vector3(INF, INF, INF)
+	var hi := Vector3(-INF, -INF, -INF)
+	for id in ids:
+		lo = lo.min(_pos(id))
+		hi = hi.max(_pos(id))
+	var center := (lo + hi) / 2
+	var dist := maxf(4.0, (maxf(hi.x - lo.x, hi.z - lo.z) + 3.0) * 0.5 / tan(deg_to_rad(_camera.fov * 0.5)))
+	_focus_look = center + Vector3(0, 0.3, 0)
+	_focus_pos = _focus_look + _cam_dir() * dist
+	_focus_until = _time + seconds
+	for i in owned.size():
+		var t: Dictionary = _tiles[owned[i]]
+		var house: Node3D = t.building
+		var tw := create_tween()
+		tw.tween_interval(0.35 + i * 0.18)
+		tw.tween_property(house, "scale", Vector3(1.25, 1.35, 1.25), 0.18).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+		tw.tween_property(house, "scale", Vector3(0.92, 0.9, 0.92), 0.12)
+		tw.tween_property(house, "scale", Vector3.ONE * 1.06, 0.14).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		tw.tween_property(house, "scale", Vector3.ONE, 0.3)
+		if labels.has(owned[i]):
+			var id: int = owned[i]
+			tw.tween_callback(func(): _stat_tag(id, labels[id], seconds - 0.8 - i * 0.18))
+		tw.tween_callback(func(): _burst(house.global_position + _up(owned[i]) * 0.6, ROOF_COLOR, _root))
+
+
+## A small panel of text floating over space `id` for `seconds`.
+func _stat_tag(id: int, text: String, seconds: float) -> void:
+	var tag := _label(text, 44, Color.WHITE, true)
+	tag.outline_size = 12
+	tag.outline_modulate = Color("#1a1a24")
+	tag.no_depth_test = true
+	tag.position = _pos(id) + _up(id) * 1.5
+	tag.scale = Vector3.ONE * 0.2
+	_root.add_child(tag)
+	var tw := create_tween()
+	tw.tween_property(tag, "scale", Vector3.ONE, 0.25).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_interval(maxf(0.6, seconds))
+	tw.tween_property(tag, "modulate:a", 0.0, 0.3)
+	tw.tween_callback(tag.queue_free)
+
+
 ## Pulls the camera back to show the whole board for `seconds`.
 func overview(seconds: float) -> void:
 	_overview_until = maxf(_overview_until, _time + seconds)
@@ -516,7 +597,7 @@ func _move_camera(delta: float) -> void:
 	elif _time >= _overview_until and not hold_overview and not always_overview \
 			and (highlight.is_empty() or not zoom_for_highlight):
 		look = _tokens[game.current].position
-		pos = look + CAMERA_DIR.normalized() * FOLLOW_DIST
+		pos = look + _cam_dir() * FOLLOW_DIST
 	var k := minf(1.0, delta * CAMERA_EASE)
 	_camera.position = _camera.position.lerp(pos, k)
 	_cam_look = _cam_look.lerp(look, k)
@@ -669,6 +750,9 @@ func _process(delta: float) -> void:
 	_time += delta
 	if game == null or _tokens.is_empty():
 		return
+	for paddle in _paddles:  # slow strokes, front and back flippers out of step
+		var k: float = sin(_time * 0.9 + paddle[1])
+		(paddle[0] as Node3D).rotation.y = paddle[3] + k * (0.45 if paddle[2] else 0.25)
 	_move_camera(delta)
 	if _block:
 		_move_block(delta)
@@ -676,7 +760,7 @@ func _process(delta: float) -> void:
 	for i in _spinners.size():
 		var s := _spinners[i]
 		s.rotation.y = sin(_time * 1.2 + i) * 0.45
-		s.position.y = SUIT_HEIGHT + sin(_time * 2.0 + i) * 0.05
+		s.position.y = s.get_meta("rest_y", SUIT_HEIGHT) + sin(_time * 2.0 + i) * 0.05
 	for a in _arrows:
 		a.position.y = 1.0 + sin(_time * 6.0) * 0.08
 
@@ -684,10 +768,32 @@ func _process(delta: float) -> void:
 # --- construction -------------------------------------------------------
 
 func _add_space(s: Dictionary) -> void:
+	var before := _root.get_child_count()
+	var spinners_before := _spinners.size()
+	_build_space(s)
+	# Everything just made for it goes in a holder at the space, turned the
+	# way the space faces (a wall space stands on its edge).
+	var holder := Node3D.new()
+	holder.position = _pos(s.id)
+	holder.basis = _basis(s.id)
+	var made: Array[Node] = []
+	for i in range(before, _root.get_child_count()):
+		made.append(_root.get_child(i))
+	_root.add_child(holder)
+	for n in made:
+		var keep: Transform3D = (n as Node3D).transform
+		_root.remove_child(n)
+		holder.add_child(n)
+		(n as Node3D).transform = keep.translated(-_pos(s.id))
+	for i in range(spinners_before, _spinners.size()):
+		_spinners[i].set_meta("rest_y", _spinners[i].position.y)
+
+
+func _build_space(s: Dictionary) -> void:
 	var base: Color = TYPE_COLORS.get(s.type, Color.GRAY)
 	if s.type == "lot":
 		base = game.board.blocks[s.block].color
-	elif s.type in ["relay", "dice", "interest", "arcade"]:
+	elif s.type in ["relay", "dice", "interest", "break", "arcade", "warp"]:
 		base = RELAY_FRAME
 	var tile := _box(Vector3(TILE, TILE_H, TILE), base)
 	tile.position = _pos(s.id) + Vector3(0, TILE_H / 2, 0)
@@ -771,15 +877,29 @@ func _add_space(s: Dictionary) -> void:
 			cabinet.position = _pos(s.id) + Vector3(0, TILE_H + 0.012, -0.05)
 			cabinet.rotation_degrees.y = -6  # nearly square on, a touch of the side showing
 			_root.add_child(cabinet)
-		"break":  # a big crescent moon floating over the tile
-			var icon := _label("☾", 110, Color("#fff2b0"), true)
-			icon.outline_size = 18
-			icon.position = _pos(s.id) + Vector3(0, SUIT_HEIGHT, -0.15)
-			_root.add_child(icon)
-			_spinners.append(icon)
+		"warp":  # a glowing pad, rings turning above it
+			title = ""
+			_squares(s.id, WARP_SQUARES, entry, 0.4)
+			for k in 3:
+				var ring := MeshInstance3D.new()
+				var torus := TorusMesh.new()
+				torus.inner_radius = 0.3 - k * 0.07
+				torus.outer_radius = 0.34 - k * 0.07
+				ring.mesh = torus
+				ring.material_override = _material(WARP_GLOW.lerp(Color.WHITE, k * 0.3), 1.2)
+				ring.position = _pos(s.id) + Vector3(0, TILE_H + 0.12 + k * 0.12, 0)
+				_root.add_child(ring)
+				_spinners.append(ring)
+		"break":  # a sleepy crescent moon lying on night-blue squares, like the Star
+			title = ""
+			_squares(s.id, MOON_SQUARES, entry, 0.25)
+			var moon := _sleepy_moon()
+			moon.position = _pos(s.id) + Vector3(0, TILE_H + 0.012, 0)
+			_root.add_child(moon)
 		"depot":  # the Bank: a grand bank with a money bag on top, a red carpet to its door
 			title = ""
 			var bank := _bank_building()
+			bank.scale = Vector3.ONE * BANK_SCALE
 			bank.position = _pos(s.id) + Vector3(0, TILE_H, -0.27)
 			_root.add_child(bank)
 			var carpet := _box(Vector3(0.18, 0.01, 0.56), BANK_CARPET)
@@ -945,6 +1065,74 @@ static func _star_mesh(outer: float, inner: float, color: Color, glow := 0.0) ->
 		st.add_vertex(up)  # top face, a fan from the middle
 		st.add_vertex(a + up)
 		st.add_vertex(b + up)
+		for v in [a, b, b + up, a, b + up, a + up]:  # the edge
+			st.add_vertex(v)
+	st.generate_normals()
+	var mi := MeshInstance3D.new()
+	mi.mesh = st.commit()
+	var m := _material(color, glow)
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mi.material_override = m
+	return mi
+
+
+## A flat, sleepy crescent moon lying on the tile (the Moon space), with a
+## darker rim, a closed eye, a little smile and a few small stars round it.
+static func _sleepy_moon() -> Node3D:
+	var root := Node3D.new()
+	var rim := _flat_shape(_crescent(0.33), STAR_THICK, MOON_RIM)
+	root.add_child(rim)
+	var face := _flat_shape(_crescent(0.3), STAR_THICK, MOON_YELLOW, 0.3)
+	face.position.y = 0.012
+	root.add_child(face)
+	var top := 0.012 + STAR_THICK
+	for i in 5:  # the closed eye: a short arc, lowest in the middle
+		var a := deg_to_rad(30.0 + i * 30.0)
+		var dot := _box(Vector3(0.02, 0.01, 0.016), Color("#5a4220"))
+		dot.position = Vector3(-0.13 + cos(a) * 0.045, top, -0.07 + sin(a) * 0.02)
+		root.add_child(dot)
+	for i in 5:  # the smile
+		var a := deg_to_rad(30.0 + i * 30.0)
+		var dot := _box(Vector3(0.018, 0.01, 0.018), Color("#b8603a"))
+		dot.position = Vector3(-0.1 + cos(a) * 0.05, top, 0.07 + sin(a) * 0.035)
+		root.add_child(dot)
+	for at in [Vector3(0.24, 0.0, -0.22), Vector3(0.3, 0.0, 0.12), Vector3(0.14, 0.0, 0.28)]:
+		var star := _star_mesh(0.06, 0.025, MOON_YELLOW, 0.5)
+		star.position = at + Vector3(0, 0.012, 0)
+		root.add_child(star)
+	return root
+
+
+## A crescent `r` in radius, its points to the right (+x): the part of a disc
+## left over once a second disc, shifted right, is cut out of it. Points run
+## round the outline in order, on the x/z plane.
+static func _crescent(r: float) -> PackedVector2Array:
+	var cut_at := Vector2(r * 0.55, -r * 0.12)  # the bite's centre
+	var cut_r := r * 0.85
+	var pts := PackedVector2Array()
+	for k in 65:  # the outer edge, round the back
+		var p := Vector2.from_angle(TAU * k / 64.0) * r
+		if p.distance_to(cut_at) >= cut_r:
+			pts.append(p)
+	for k in range(64, -1, -1):  # back along the bite
+		var p := cut_at + Vector2.from_angle(TAU * k / 64.0) * cut_r
+		if p.length() < r:
+			pts.append(p)
+	return pts
+
+
+## A flat shape `thick` thick lying on y = 0 with outline `pts` (x/z),
+## filled and edged, in `color`.
+static func _flat_shape(pts: PackedVector2Array, thick: float, color: Color, glow := 0.0) -> MeshInstance3D:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var up := Vector3(0, thick, 0)
+	var tris := Geometry2D.triangulate_polygon(pts)
+	for i in tris:
+		st.add_vertex(Vector3(pts[i].x, 0, pts[i].y) + up)
+	for k in pts.size():
+		var a := Vector3(pts[k].x, 0, pts[k].y)
+		var b := Vector3(pts[(k + 1) % pts.size()].x, 0, pts[(k + 1) % pts.size()].y)
 		for v in [a, b, b + up, a, b + up, a + up]:  # the edge
 			st.add_vertex(v)
 	st.generate_normals()
@@ -1234,21 +1422,31 @@ static func _bank_building() -> Node3D:
 	dome.mesh = half
 	dome.material_override = _material(BANK_STONE.lightened(0.1))
 	add.call(dome, Vector3(0, 0.675, -0.06))
-	# The money bag: a round sack, tied at the neck, the top flaring out, a G.
-	var bag := MeshInstance3D.new()
-	var sack := SphereMesh.new()
-	sack.radius = 0.12
-	sack.height = 0.22
-	bag.mesh = sack
-	bag.material_override = _material(BANK_GOLD, 0.25)
-	add.call(bag, Vector3(0, 0.9, -0.06))
-	add.call(_cyl(0.035, 0.05, 0.04, BANK_GOLD.darkened(0.25)), Vector3(0, 1.02, -0.06))
-	add.call(_cyl(0.07, 0.03, 0.06, BANK_GOLD), Vector3(0, 1.07, -0.06))
+	# The money bag sitting on the dome, leaning to one side: a round sack,
+	# tied at the neck, the top flaring out, a G on its front.
+	var bag := Node3D.new()
+	bag.rotation = Vector3(-0.15, 0.3, 0.3)  # tipped over to the left, turned a little
+	add.call(bag, Vector3(0, 0.76, -0.06))
+	var sack := MeshInstance3D.new()
+	var ball := SphereMesh.new()
+	ball.radius = 0.16
+	ball.height = 0.29
+	sack.mesh = ball
+	sack.material_override = _material(BANK_GOLD, 0.25)
+	sack.position.y = 0.15
+	bag.add_child(sack)
+	var neck := _cyl(0.045, 0.065, 0.05, BANK_GOLD.darkened(0.25))
+	neck.position.y = 0.31
+	bag.add_child(neck)
+	var top := _cyl(0.095, 0.04, 0.08, BANK_GOLD)
+	top.position.y = 0.37
+	bag.add_child(top)
 	var g := _label("G", 70, BANK_GOLD.darkened(0.45))
 	g.rotation_degrees.x = 0
 	g.outline_size = 0
-	g.pixel_size = 0.0025
-	add.call(g, Vector3(0, 0.9, 0.062))
+	g.pixel_size = 0.0034
+	g.position = Vector3(0, 0.15, 0.162)
+	bag.add_child(g)
 	return root
 
 
@@ -1479,6 +1677,240 @@ static func _cyl(top: float, bottom: float, height: float, color: Color) -> Mesh
 	return mi
 
 
+## What a 3D board stands on (Board.props): towers carry the spaces climbing
+## their face, isles are sandy islands down to the sea, a bottle is a giant
+## glass bottle the spaces wrap round; "island" draws nothing (the spaces
+## float on their own).
+func _build_props() -> void:
+	var stone := _material(Color("#a8a49c"))
+	for p in game.board.props:
+		var at := Vector3(p.at[0], p.at[1], p.at[2]) * SPACING
+		match p.get("kind", ""):
+			"isle":  # a sandy island under the spaces, down to the sea, palms on it
+				_build_isle(at, Vector2(p.size[0], p.size[1]) * SPACING)
+			"turtle":  # a giant sea turtle, the spaces on its shell
+				var h: Array = p.get("heading", [0, 0, 1])
+				_build_turtle(at, float(p.radius) * SPACING, Vector3(h[0], h[1], h[2]).normalized())
+			"bottle":  # a giant glass bottle the spaces wrap round
+				_build_bottle(at, float(p.radius) * SPACING, float(p.height) * SPACING)
+			"tower":
+				var size := Vector3(p.size[0], p.size[1], p.size[2]) * SPACING
+				var tower := _box(size, Color.WHITE)
+				tower.material_override = stone
+				tower.position = at + Vector3(0, size.y / 2 - 0.3, 0)
+				_root.add_child(tower)
+				for k in int(size.y / 0.6):  # courses of stone across it
+					var course := _box(Vector3(size.x + 0.02, 0.03, size.z + 0.02), Color("#86827a"))
+					course.position = at + Vector3(0, k * 0.6, 0)
+					_root.add_child(course)
+
+
+## A sandy island `size` across with its top at `at`, sloping down into the
+## sea below (the Pirate Sea lies under the board), with palm trees round its
+## edge.
+func _build_isle(at: Vector3, size: Vector2) -> void:
+	var sand := _material(Color("#d8c08a").lerp(FADE_TO, PROP_FADE))
+	var wet := _material(Color("#a8905a").lerp(FADE_TO, PROP_FADE))
+	var depth := at.y + 6.0  # down past the waterline
+	var top := _cyl(0.5, 0.5, 0.2, Color.WHITE)
+	top.material_override = sand
+	top.scale = Vector3(size.x * 1.08, 1, size.y * 1.08)
+	top.position = at - Vector3(0, 0.12, 0)
+	_root.add_child(top)
+	var slope := _cyl(0.54, 0.75, depth, Color.WHITE)
+	slope.material_override = wet
+	slope.scale = Vector3(size.x, 1, size.y)
+	slope.position = at - Vector3(0, 0.22 + depth / 2, 0)
+	_root.add_child(slope)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = int(at.x * 31 + at.z * 17)
+	for k in 3:  # palms on the edge, leaning out
+		var a := TAU * (k + rng.randf() * 0.5) / 3.0
+		var foot := at + Vector3(cos(a) * size.x * 0.52, -0.1, sin(a) * size.y * 0.52)
+		var palm := Node3D.new()
+		palm.position = foot
+		palm.rotation = Vector3(sin(a) * 0.25, 0, -cos(a) * 0.25)
+		_root.add_child(palm)
+		var trunk := _cyl(0.05, 0.08, 1.4, Color("#8a6a3a").lerp(FADE_TO, PROP_FADE))
+		trunk.position.y = 0.7
+		palm.add_child(trunk)
+		for f in 6:
+			var frond := _box(Vector3(0.9, 0.02, 0.18), Color("#3a8a3a").lerp(FADE_TO, PROP_FADE))
+			frond.position = Vector3(cos(TAU * f / 6.0) * 0.4, 1.38, sin(TAU * f / 6.0) * 0.4)
+			frond.rotation = Vector3(0, -TAU * f / 6.0, -0.35)
+			palm.add_child(frond)
+
+
+## A giant sea turtle swimming in the sea, its shell's flat top carrying the
+## spaces at `at` (the spaces' height), `radius` across, swimming towards
+## `heading` with its head under the water: a domed brown shell rising out of
+## the water, patterned in plates (_shell_material), a flat plate on top for
+## the spaces, four flippers paddling slowly at the surface and a little tail.
+func _build_turtle(at: Vector3, radius: float, heading: Vector3) -> void:
+	var water := -Scenery.SEA_DROP  # where the sea's surface is
+	var shell := _shell_material(false)  # brown plates with grooves and rings
+	var plate := _shell_material(true, radius * 0.95)  # the flat top: rings round its middle
+	var rim := _material(Color("#4a2e18").lerp(FADE_TO, PROP_FADE))
+	var skin := _material(Color("#86a05a").lerp(FADE_TO, PROP_FADE))
+	var turtle := Node3D.new()
+	turtle.position = Vector3(at.x, 0, at.z)
+	turtle.basis = Basis.looking_at(-heading, Vector3.UP)  # its +z is the way it faces
+	_root.add_child(turtle)
+	var top := at.y - 0.12  # the shell's top, just under the spaces
+	var rise := top - water + 0.4
+	var dome := MeshInstance3D.new()
+	var ball := SphereMesh.new()
+	ball.radius = 1.0
+	ball.height = 1.0  # a hemisphere's own height
+	ball.is_hemisphere = true
+	ball.radial_segments = 32
+	ball.rings = 12
+	dome.mesh = ball
+	dome.material_override = shell
+	dome.scale = Vector3(radius * 1.15, rise, radius * 1.3)
+	dome.position.y = water - 0.4
+	turtle.add_child(dome)
+	var cap := _cyl(radius * 0.86, radius * 0.95, 0.18, Color.WHITE)  # the flat top the spaces stand on
+	cap.material_override = plate
+	cap.scale = Vector3(1, 1, 1.12)
+	cap.position.y = top - 0.09
+	turtle.add_child(cap)
+	var band := MeshInstance3D.new()  # its rim
+	var torus := TorusMesh.new()
+	torus.inner_radius = radius * 0.86
+	torus.outer_radius = radius * 0.98
+	band.mesh = torus
+	band.material_override = rim
+	band.scale = Vector3(1, 0.5, 1.12)
+	band.position.y = top - 0.1
+	turtle.add_child(band)
+	# Four flippers paddling, the tail behind.
+	for front in [true, false]:
+		for side in [-1, 1]:
+			var hinge := Node3D.new()
+			hinge.position = Vector3(side * radius * 0.95, water + 0.05, radius * (0.75 if front else -0.8))
+			var rest: float = side * (0.6 if front else 2.4)
+			hinge.rotation.y = rest
+			turtle.add_child(hinge)
+			var flipper := _ball(1.0, Color.WHITE)
+			flipper.material_override = skin
+			var length := radius * (0.85 if front else 0.5)
+			flipper.scale = Vector3(length, 0.07, radius * 0.25)
+			flipper.position.x = side * length * 0.8
+			hinge.add_child(flipper)
+			_paddles.append([hinge, randf() * TAU, front, rest])
+	var tail := _cyl(0.0, radius * 0.12, radius * 0.4, Color.WHITE)
+	tail.material_override = skin
+	tail.rotation.x = -PI / 2
+	tail.position = Vector3(0, water + 0.1, -radius * 1.4)
+	turtle.add_child(tail)
+	for n in turtle.find_children("*", "MeshInstance3D", true, false):
+		(n as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+
+
+## A ball `r` across in `color`.
+static func _ball(r: float, color: Color) -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	var mesh := SphereMesh.new()
+	mesh.radius = r
+	mesh.height = r * 2
+	mi.mesh = mesh
+	mi.material_override = _material(color)
+	return mi
+
+
+## A turtle shell's surface. The dome (`top` false): rows of plates round it
+## with dark grooves between, fine growth rings in each plate, lighter plate
+## middles, darker towards the waterline, a soft sheen on top. The flat top
+## (`top` true): rings round its middle and a darker edge.
+static func _shell_material(top: bool, span := 1.0) -> ShaderMaterial:
+	var shader := Shader.new()
+	shader.code = """
+shader_type spatial;
+uniform bool top = false;
+uniform float span = 1.0;  // the flat top's radius
+uniform vec3 fade_to : source_color = vec3(0.66, 0.77, 0.8);
+uniform float fade = 0.0;
+uniform vec3 dark : source_color = vec3(0.24, 0.14, 0.07);
+uniform vec3 mid : source_color = vec3(0.42, 0.27, 0.14);
+uniform vec3 light : source_color = vec3(0.62, 0.44, 0.24);
+varying vec3 local;
+void vertex() { local = VERTEX; }
+void fragment() {
+	vec3 c;
+	if (top) {
+		float r = length(local.xz) / span;
+		float rings = 0.5 + 0.5 * sin(r * 22.0);
+		c = mix(mid, light, 0.35 + 0.25 * rings);
+		c = mix(c, dark, smoothstep(0.8, 1.0, r));
+	} else {
+		// Rows of plates up the dome, each row offset, by angle and height.
+		float h = clamp(local.y, 0.0, 1.0);
+		float row = floor(h * 3.0);
+		float count = 9.0 - row * 2.0;
+		float u = (atan(local.x, local.z) / 6.28318 + 0.5) * count + row * 0.5;
+		vec2 cell = vec2(fract(u), fract(h * 3.0)) - 0.5;
+		float edge = max(abs(cell.x) * 1.15, abs(cell.y));
+		float groove = smoothstep(0.42, 0.5, edge);
+		float rings = 0.5 + 0.5 * sin(edge * 40.0);
+		c = mix(light, mid, smoothstep(0.0, 0.4, edge));
+		c = mix(c, c * 0.82, rings * 0.5);
+		c = mix(c, dark, groove);
+		c *= mix(0.55, 1.0, smoothstep(0.0, 0.7, h));  // darker towards the water
+	}
+	c = mix(c, fade_to, fade);  // faded a little, so the spaces stand out
+	ALBEDO = c;
+	ROUGHNESS = 0.45;
+	SPECULAR = 0.4;
+}
+"""
+	var m := ShaderMaterial.new()
+	m.shader = shader
+	m.set_shader_parameter("top", top)
+	m.set_shader_parameter("span", span)
+	m.set_shader_parameter("fade", PROP_FADE)
+	return m
+
+
+## A giant glass bottle standing on `at`, `radius` round and `height` up to its
+## shoulder: a tinted glass body, the shoulder narrowing to a neck, a lip and
+## a thicker glass base; nothing else (the board turns shadows off).
+func _build_bottle(at: Vector3, radius: float, height: float) -> void:
+	var glass := _material(Color(0.55, 0.85, 0.75, 0.28))
+	glass.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	glass.roughness = 0.05
+	glass.metallic = 0.2
+	glass.rim_enabled = true
+	glass.rim = 0.6
+	var parts := [  # [top radius, bottom radius, height, centre height]
+		[radius, radius, height, height / 2],
+		[radius * 0.35, radius, radius * 0.9, height + radius * 0.45],
+		[radius * 0.35, radius * 0.35, radius * 1.6, height + radius * 1.7],
+	]
+	for p in parts:
+		var piece := _cyl(p[0], p[1], p[2], Color.WHITE)
+		(piece.mesh as CylinderMesh).radial_segments = 48
+		piece.material_override = glass
+		piece.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		piece.position = at + Vector3(0, p[3], 0)
+		_root.add_child(piece)
+	var lip := MeshInstance3D.new()
+	var torus := TorusMesh.new()
+	torus.inner_radius = radius * 0.33
+	torus.outer_radius = radius * 0.42
+	lip.mesh = torus
+	lip.material_override = glass
+	lip.position = at + Vector3(0, height + radius * 2.5, 0)
+	_root.add_child(lip)
+	var base := _cyl(radius * 1.02, radius * 1.02, 0.25, Color.WHITE)
+	var base_glass := glass.duplicate() as StandardMaterial3D
+	base_glass.albedo_color = Color(0.4, 0.7, 0.6, 0.6)
+	base.material_override = base_glass
+	base.position = at + Vector3(0, 0.12, 0)
+	_root.add_child(base)
+	base.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+
+
 ## A suit symbol modelled from primitives, standing upright (it sways in _process).
 static func _suit(mark: String, color: Color) -> Node3D:
 	var root := Node3D.new()
@@ -1542,7 +1974,8 @@ static func _shape_part(mesh: PrimitiveMesh, m: Material, at: Vector3, size: flo
 func _add_link(a: Vector3, b: Vector3) -> void:
 	var link := _box(Vector3(0.12, 0.04, a.distance_to(b)), Color("#55556a"))
 	link.position = (a + b) / 2 + Vector3(0, 0.02, 0)
-	link.basis = Basis.looking_at((b - a).normalized(), Vector3.UP)
+	var hint := Vector3.BACK if absf((b - a).normalized().y) > 0.9 else Vector3.UP  # a link straight up a wall
+	link.basis = Basis.looking_at((b - a).normalized(), hint)
 	_root.add_child(link)
 	# A small cone halfway along shows the direction of travel.
 	var cone := MeshInstance3D.new()
@@ -1553,7 +1986,7 @@ func _add_link(a: Vector3, b: Vector3) -> void:
 	cone.mesh = prism
 	cone.material_override = _material(Color("#8888a0"))
 	cone.position = (a + b) / 2 + Vector3(0, 0.08, 0)
-	cone.basis = Basis.looking_at((b - a).normalized(), Vector3.UP) * Basis(Vector3.RIGHT, -PI / 2)
+	cone.basis = Basis.looking_at((b - a).normalized(), hint) * Basis(Vector3.RIGHT, -PI / 2)
 	_root.add_child(cone)
 
 
@@ -1579,108 +2012,137 @@ func _popup(pos: Vector3, text: String, color: Color) -> void:
 func _frame_camera() -> void:
 	if game == null or _camera == null:
 		return
-	var lo := Vector3(INF, 0, INF)
-	var hi := Vector3(-INF, 0, -INF)
+	var lo := Vector3(INF, INF, INF)
+	var hi := Vector3(-INF, -INF, -INF)
 	for s in game.board.spaces:
 		lo = lo.min(_pos(s.id))
 		hi = hi.max(_pos(s.id))
 	var center := (lo + hi) / 2
 	var view := get_viewport().get_visible_rect().size
 	var aspect := view.x / maxf(view.y, 1.0)
-	var need := maxf(hi.z - lo.z, (hi.x - lo.x) / aspect) + 2.6
+	var need := maxf(hi.z - lo.z + (hi.y - lo.y) * 0.85, (hi.x - lo.x) / aspect) + 2.6  # height shows as depth
+	# Islands and turtles: centred and fitted on what the camera sees of them,
+	# from the tops down to the sea (a turtle's shell bulges well below its
+	# spaces), measured across and up the view.
+	var seen: Array[Vector3] = []
+	for p in game.board.props:
+		var r := 0.0
+		match String(p.get("kind", "")):
+			"turtle":
+				r = float(p.radius) * 1.15
+			"isle":
+				r = float(p.size[0]) * 0.5
+		if r == 0.0:
+			continue
+		var at := Vector3(p.at[0], p.at[1], p.at[2]) * SPACING
+		for k in 16:
+			var out := Vector3(sin(TAU * k / 16.0), 0, cos(TAU * k / 16.0)) * r * SPACING
+			seen.append(at + out)
+			seen.append(Vector3(at.x, -Scenery.SEA_DROP, at.z) + out)
+	if not seen.is_empty():
+		for s in game.board.spaces:
+			seen.append(_pos(s.id))
+		# Through the camera's perspective (the near turtle looms larger and
+		# lower), a few rounds of moving the aim to the middle of what is seen
+		# and the camera in or out until it just fits.
+		var ahead := -_cam_dir()
+		var across := ahead.cross(Vector3.UP).normalized()
+		var upward := across.cross(ahead).normalized()
+		var half_v := tan(deg_to_rad(_camera.fov * 0.5))
+		var far := need * 0.5 / half_v
+		for round in 12:
+			var eye := center - ahead * far
+			var x_lo := INF
+			var x_hi := -INF
+			var y_lo := INF
+			var y_hi := -INF
+			for q in seen:
+				var rel: Vector3 = q - eye
+				var z := maxf(rel.dot(ahead), 0.1)
+				x_lo = minf(x_lo, rel.dot(across) / z)
+				x_hi = maxf(x_hi, rel.dot(across) / z)
+				y_lo = minf(y_lo, rel.dot(upward) / z)
+				y_hi = maxf(y_hi, rel.dot(upward) / z)
+			center += (across * (x_lo + x_hi) + upward * (y_lo + y_hi)) * 0.5 * far
+			far *= maxf((y_hi - y_lo) * 0.5, (x_hi - x_lo) * 0.5 / aspect) / (half_v * 0.94)
+		need = far * 2.0 * half_v
 	var dist := need * 0.5 / tan(deg_to_rad(_camera.fov * 0.5))
 	_overview_look = center
-	_overview_pos = center + CAMERA_DIR.normalized() * dist
+	_overview_pos = center + _cam_dir() * dist
 
 
 # --- helpers ------------------------------------------------------------
 
+## Which way the camera looks from (towards it from what it looks at): the
+## board's own `camera` if it has one (a tall 3D board is seen more from the
+## side), else CAMERA_DIR.
+func _cam_dir() -> Vector3:
+	if game != null and game.board != null and game.board.camera.size() == 3:
+		return Vector3(game.board.camera[0], game.board.camera[1], game.board.camera[2]).normalized()
+	return CAMERA_DIR.normalized()
+
+
 func _pos(id: int) -> Vector3:
 	var s := game.board.spaces[id]
+	var at: Array = s.get("at", [])
+	if at.size() == 3:
+		return Vector3(at[0], at[1], at[2]) * SPACING
 	return Vector3(s.x * SPACING, 0, s.y * SPACING)
+
+
+## How space `id` is turned: level, or stood on its edge facing the camera.
+func _basis(id: int) -> Basis:
+	var face = game.board.spaces[id].get("face", "up")
+	if face is Array and face.size() == 3:
+		# Its top points along `face`; its front edge (the sign side) points down
+		# when it stands on a wall, as a "front" space does.
+		var up := Vector3(face[0], face[1], face[2]).normalized()
+		var down := Vector3.DOWN - up * Vector3.DOWN.dot(up)
+		var z := down.normalized() if down.length() > 0.01 else Vector3.BACK
+		return Basis(up.cross(z), up, z)
+	return Basis(Vector3.RIGHT, PI / 2) if str(face) == "front" else Basis.IDENTITY
+
+
+## Which way is up on space `id`.
+func _up(id: int) -> Vector3:
+	return _basis(id).y
 
 
 ## Where a token stands on its space; up to four share a tile, one per corner.
 func _token_spot(index: int) -> Vector3:
 	var p := game.players[index]
 	var off := Vector3(-0.3 if index % 2 == 0 else 0.3, TILE_H, -0.3 if index < 2 else 0.3)
-	return _pos(_preview.get(index, p.position)) + off
+	var id: int = _preview.get(index, p.position)
+	return _pos(id) + _basis(id) * off
 
 
-## Filler scenery: the board sits on a sunny, very basic golf course. Rough
-## grass all round, light fairways running off towards greens with a flag in
-## the hole, sand bunkers, a pond, and trees round the edge. The same course
-## every time for a given board (a fixed seed).
-func _build_golf_course(lo: Vector3, hi: Vector3) -> void:
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 1964
-	var centre := (lo + hi) / 2
-	var half := Vector2(hi.x - lo.x, hi.z - lo.z) / 2 + Vector2(1.6, 1.6)  # board plus a margin
-	var reach := maxf(half.x, half.y)
-	var rough := _box(Vector3(reach * 8, 0.1, reach * 8), Color("#4f9a3c"))
-	rough.position = centre - Vector3(0, 0.17, 0)
-	_root.add_child(rough)
-	# A spot on the course: outside the board, `out` of the board's size away.
-	var spot := func(angle: float, out: float) -> Vector3:
-		var dir := Vector2.from_angle(angle)
-		var edge := minf(half.x / maxf(absf(dir.x), 0.01), half.y / maxf(absf(dir.y), 0.01))
-		return centre + Vector3(dir.x, 0, dir.y) * (edge + out)
-	# Three holes: a fairway strip running away from the board to a round green.
-	for h in 3:
-		var angle := TAU * h / 3.0 + rng.randf_range(-0.3, 0.3)
-		var tee: Vector3 = spot.call(angle, 1.5)
-		var green: Vector3 = spot.call(angle, rng.randf_range(9.0, 13.0))
-		var fairway := _box(Vector3(2.6, 0.04, tee.distance_to(green)), Color("#6cc24f"))
-		fairway.position = (tee + green) / 2 - Vector3(0, 0.12, 0)
-		fairway.rotation.y = atan2(green.x - tee.x, green.z - tee.z)
-		_root.add_child(fairway)
-		_add_disc(green, 1.7, 0.06, Color("#7fd85a"), -0.11)
-		_add_disc(green + Vector3(0.4, 0, 0.3), 0.08, 0.08, Color("#1a1a1a"), -0.09)  # the hole
-		var pin := _box(Vector3(0.05, 1.6, 0.05), Color.WHITE)
-		pin.position = green + Vector3(0.4, 0.7, 0.3)
-		_root.add_child(pin)
-		var flag := _box(Vector3(0.5, 0.3, 0.03), Color("#ff4a4a"))
-		flag.position = green + Vector3(0.65, 1.35, 0.3)
-		_root.add_child(flag)
-		# A bunker beside each green, and a tee box at the near end.
-		var side := Vector3(cos(angle + PI / 2), 0, sin(angle + PI / 2))
-		_add_disc(green + side * rng.randf_range(2.2, 2.8), 0.9, 0.05, Color("#efd9a0"), -0.11)
-		var tee_box := _box(Vector3(1.2, 0.06, 0.8), Color("#78c95a"))
-		tee_box.position = tee - Vector3(0, 0.1, 0)
-		tee_box.rotation.y = fairway.rotation.y
-		_root.add_child(tee_box)
-	# A pond, a couple more bunkers, and trees scattered round the edge.
-	_add_disc(spot.call(TAU / 6.0 + 0.4, 5.0), 2.6, 0.05, Color("#3f8fd8"), -0.11)
-	for i in 2:
-		_add_disc(spot.call(rng.randf() * TAU, rng.randf_range(3.0, 6.0)), rng.randf_range(0.7, 1.1),
-				0.05, Color("#efd9a0"), -0.11)
-	for i in 34:
-		var at: Vector3 = spot.call(rng.randf() * TAU, rng.randf_range(2.5, 16.0))
-		var size := rng.randf_range(0.7, 1.3)
-		var trunk := _box(Vector3(0.18, 0.9, 0.18) * size, Color("#7a5232"))
-		trunk.position = at + Vector3(0, 0.3 * size, 0)
-		_root.add_child(trunk)
-		var leaves := MeshInstance3D.new()
-		var ball := SphereMesh.new()
-		ball.radius = 0.55 * size
-		ball.height = 1.1 * size
-		leaves.mesh = ball
-		leaves.material_override = _material(Color("#2f7a34").lightened(rng.randf() * 0.25))
-		leaves.position = at + Vector3(0, 1.05 * size, 0)
-		_root.add_child(leaves)
+## Switches the backdrop to `name` (one of Scenery.THEMES, or "auto" for the
+## board's own) and rebuilds it now if a board is up.
+func set_theme(name: String) -> void:
+	theme = name
+	if game != null and _root != null:
+		_build_scenery()
 
 
-## A flat round patch (green, bunker, pond) lying on the course.
-func _add_disc(at: Vector3, radius: float, height: float, color: Color, y: float) -> void:
-	var mi := MeshInstance3D.new()
-	var cyl := CylinderMesh.new()
-	cyl.top_radius = radius
-	cyl.bottom_radius = radius
-	cyl.height = height
-	mi.mesh = cyl
-	mi.material_override = _material(color)
-	mi.position = Vector3(at.x, y, at.z)
-	_root.add_child(mi)
+## The backdrop round and below the floating board (Scenery): its scenery,
+## sky, light and fog.
+func _build_scenery() -> void:
+	if _scenery:
+		_scenery.queue_free()
+	var name := game.board.theme if theme == "auto" else theme
+	_scenery = Scenery.make(name, _lo, _hi)
+	_scenery.thunder.connect(thunder.emit)
+	_root.add_child(_scenery)
+	_env.background_color = _scenery.sky
+	_env.ambient_light_color = _scenery.ambient
+	_env.ambient_light_energy = _scenery.ambient_energy
+	_sun.light_color = _scenery.sun_color
+	_sun.light_energy = _scenery.sun_energy
+	# A board round a glass bottle shows only the glass: no shadows at all.
+	_sun.shadow_enabled = not game.board.props.any(func(p): return p.get("kind", "") == "bottle")
+	_env.fog_enabled = _scenery.fog > 0.0
+	_env.fog_light_color = _scenery.sky
+	_env.fog_density = _scenery.fog
 
 
 static func _material(color: Color, glow := 0.0) -> StandardMaterial3D:
@@ -1728,16 +2190,19 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	var from := _camera.project_ray_origin(event.position)
 	var dir := _camera.project_ray_normal(event.position)
-	if absf(dir.y) < 0.0001:
-		return
-	var hit := from + dir * ((TILE_H - from.y) / dir.y)
 	var best := -1
-	var best_d := TILE * 0.6
+	var best_far := INF  # the nearest tile the ray meets
 	for s in game.board.spaces:
-		var at := _pos(s.id)
-		var d := Vector2(hit.x - at.x, hit.z - at.z).length()
-		if d < best_d:
+		var up := _up(s.id)
+		var top := _pos(s.id) + up * TILE_H
+		var facing := dir.dot(up)
+		if absf(facing) < 0.0001:
+			continue
+		var far := (top - from).dot(up) / facing
+		var hit := from + dir * far
+		var local := _basis(s.id).inverse() * (hit - top)
+		if far > 0.0 and far < best_far and absf(local.x) < TILE * 0.55 and absf(local.z) < TILE * 0.55:
 			best = s.id
-			best_d = d
+			best_far = far
 	if best >= 0:
 		space_clicked.emit(best)

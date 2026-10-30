@@ -1,8 +1,9 @@
 # One long street with two alleys across it: lots of small choices instead
 # of one big one.
-name: Long Street
+name: Castle Fort
 goal: 8000
 name_offset: 48
+theme: castle
 map:
 a a a X + b b S b b + c c R c
 D . . . P . . . . . ? . . . H

@@ -2,14 +2,17 @@ class_name Settings
 extends RefCounted
 ## The player's options, kept in user://settings.cfg and changed from the
 ## Escape menu: music and sound effects each switched on or off and set to a
-## volume (0-100), and whether the camera always shows the whole board
-## (zoomed_out). Music plays on the "Music" audio bus and effects on "SFX"
+## volume (0-100), whether the camera always shows the whole board
+## (zoomed_out), the board's backdrop (theme: "auto" for the board's own, or
+## one of Scenery.THEMES), faster dice and walking (fast_dice, fast_walk), and
+## whether the dice and footsteps make a sound (dice_sound, step_sound). Music plays on the "Music" audio bus and effects on "SFX"
 ## (Music, Sfx), so the sound options are just those buses' volume and mute.
 
 const PATH := "user://settings.cfg"
 const BUSES := {"music": "Music", "sfx": "SFX"}
 const DEFAULTS := {"music_on": true, "music_volume": 100, "sfx_on": true, "sfx_volume": 100,
-		"zoomed_out": false}
+		"zoomed_out": false, "theme": "auto", "fast_dice": false, "fast_walk": false,
+		"dice_sound": true, "step_sound": true}
 
 static var values := {}
 

@@ -17,7 +17,7 @@ const PAD := 6.0
 const OVERLAY_SIZE := Vector2(240, 170)  # the corner map stays this small
 ## Letters on special spaces in the overlay.
 const LETTERS := {"depot": "B", "wildcard": "?", "arcade": "M", "interest": "★", "break": "☾",
-		"dice": "D", "market": "$"}
+		"dice": "D", "market": "$", "warp": "W"}
 
 var game: GameState
 var focus := ""
@@ -67,6 +67,8 @@ func _draw() -> void:
 	var spaces := game.board.spaces
 	for s in spaces:
 		for n in s.next:
+			if s.type == "warp" and spaces[n].type == "warp":
+				continue  # warps jump; no path between them
 			draw_line(_centre(s), _centre(spaces[n]), Color(1, 1, 1, 0.12), 3.0)
 	var font := ThemeDB.fallback_font
 	for s in spaces:

@@ -14,6 +14,7 @@ extends Node
 ##               (a star rising on the Star space)
 ##               "takeover" an epic orchestral hit (buying out a rival's lot):
 ##               a drum roll swelling into two brass stabs and a held chord
+##               "thunder" a crack and a long low rumble (Storm Clouds)
 ## Game events carry the name in "sound" (GameState._sound). Clips are cached
 ## like the music.
 
@@ -26,7 +27,7 @@ const STEP_STYLE := "marimba"
 const STEP_NOTES := [60, 64]  # alternate steps
 const BACK_NOTE := 55
 const LEVEL_DB := {"step": -4.0, "back": -6.0, "bond_buy": -1.0, "bond_sell": -1.0, "build": 0.0,
-		"purchase": 0.0, "dice_hit": 0.0, "dice_bounce": -8.0, "dice_land": -2.0, "sparkle": -1.0, "takeover": 0.0}
+		"purchase": 0.0, "dice_hit": -9.0, "dice_bounce": -14.0, "dice_land": -9.0, "sparkle": -1.0, "takeover": 0.0, "thunder": -4.0}
 ## The register's "ching": a small, high, clangy strike that dies quickly
 ## (not a bell left ringing).
 const CHING := [[1.0, 1.0, 9.0], [1.47, 0.6, 12.0], [2.09, 0.55, 15.0], [2.76, 0.45, 20.0]]
@@ -58,18 +59,25 @@ func _ready() -> void:
 	_sounds.dice_land = Music.cached("dice_land", "", _dice_land, false)
 	_sounds.sparkle = Music.cached("sparkle", "", _sparkle, false)
 	_sounds.takeover = Music.cached("takeover", "", _takeover, false)
+	_sounds.thunder = Music.cached("thunder", "", _thunder, false)
 
 
 ## The sound for the `n`th space of a move (from 0).
 func step(n: int) -> void:
+	if not Settings.get_value("step_sound"):
+		return
 	_start(_steps[n % _steps.size()], LEVEL_DB.step)
 
 
 func back() -> void:
+	if not Settings.get_value("step_sound"):
+		return
 	_start(_sounds.back, LEVEL_DB.back)
 
 
 func play(name: String) -> void:
+	if name.begins_with("dice_") and not Settings.get_value("dice_sound"):
+		return
 	if _sounds.has(name):
 		_start(_sounds[name], LEVEL_DB.get(name, 0.0))
 
@@ -214,10 +222,10 @@ static func _dice_hit() -> PackedFloat32Array:
 	var buf := _samples(1.0)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 31
-	Music._drum(buf, "woodblock", 0.0, 1.0, rng, 0)
+	Music._drum(buf, "woodblock", 0.0, 0.45, rng, 0)
 	Music._drum(buf, "kick", 0.0, 0.4, rng, 0)
-	for i in 3:
-		Music._struck(buf, 0.02 + i * 0.035, [88, 91, 96][i], 0.35, Music.GLOCK)
+	for i in 3:  # a soft, low flourish
+		Music._struck(buf, 0.03 + i * 0.045, [72, 76, 79][i], 0.18, Music.MARIMBA)
 	Music._reverb(buf, 0.15)
 	Music._normalise(buf)
 	return buf
@@ -238,9 +246,8 @@ static func _dice_bounce() -> PackedFloat32Array:
 ## The roll settles face on: two bright notes, a fourth apart.
 static func _dice_land() -> PackedFloat32Array:
 	var buf := _samples(1.2)
-	Music._struck(buf, 0.0, 84, 0.5, Music.VIBES)
-	Music._struck(buf, 0.09, 89, 0.6, Music.VIBES)
-	Music._struck(buf, 0.09, 101, 0.2, Music.GLOCK)
+	Music._struck(buf, 0.0, 72, 0.5, Music.VIBES)
+	Music._struck(buf, 0.09, 77, 0.55, Music.VIBES)
 	Music._reverb(buf, 0.2)
 	Music._normalise(buf)
 	return buf
@@ -290,5 +297,27 @@ static func _takeover() -> PackedFloat32Array:
 	for k in 6:
 		Music._struck(buf, 1.3 + k * 0.07, [91, 95, 98, 103, 98, 103][k], 0.12, Music.GLOCK)
 	Music._reverb(buf, 0.3)
+	Music._normalise(buf)
+	return buf
+
+
+## Thunder: a sharp crack, then a deep rumble rolling away, made from noise
+## smoothed heavier and heavier so it gets lower as it fades.
+static func _thunder() -> PackedFloat32Array:
+	var buf := _samples(4.0)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 51
+	var lp := 0.0
+	var lp2 := 0.0
+	for i in buf.size():
+		var t := float(i) / Music.RATE
+		var x := rng.randf_range(-1.0, 1.0)
+		var smooth := lerpf(0.25, 0.012, minf(1.0, t / 1.5))  # brighter at the crack
+		lp += smooth * (x - lp)
+		lp2 += smooth * (lp - lp2)
+		var crack := exp(-t * 18.0) * 0.6
+		var rumble := minf(1.0, t / 0.08) * exp(-t * 0.9) * (0.75 + 0.25 * sin(t * 5.3) * sin(t * 2.1))
+		buf[i] = lp2 * (rumble * 3.0) + lp * crack
+	Music._reverb(buf, 0.35)
 	Music._normalise(buf)
 	return buf
