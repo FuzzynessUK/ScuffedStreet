@@ -16,8 +16,21 @@ static func wants_buy(g: GameState, p: PlayerState, cost: int) -> bool:
 	return p.cash - cost >= reserve(g, p)
 
 
-static func wants_renovate(g: GameState, p: PlayerState, cost: int) -> bool:
-	return p.cash - cost >= reserve(g, p) * 3 / 2
+## What a CPU invests when it may (`rate`: the price per G of capital): as
+## much as one lot takes (the one with the best block share), keeping 1.5x its
+## reserve. Returns [[lot, amount]], or [] to invest nothing.
+static func invest_plan(g: GameState, p: PlayerState, rate: float) -> Array:
+	var mine: Array = g.lots.keys().filter(func(id): return g.lots[id].owner == p.index)
+	mine.sort_custom(func(a, b):
+			return g.block_multiplier(a) * g.space(a).price > g.block_multiplier(b) * g.space(b).price)
+	var spare := p.cash - reserve(g, p) * 3 / 2
+	var plan := []
+	for id in mine:
+		var amount := mini(g.invest_limit(id), floori(spare / rate))
+		if amount >= 10:
+			plan.append([id, amount])
+			break  # one lot a time, as for a human
+	return plan
 
 
 static func wants_buyout(g: GameState, p: PlayerState, id: int, cost: int) -> bool:
@@ -96,3 +109,30 @@ static func pick_heap_slot(g: GameState, p: PlayerState) -> int:
 		elif size == best_size:
 			best.append(s)
 	return best[g.rng.randi() % best.size()]
+
+
+## Whether CPU `p` accepts a trade in which it gives `give_lots` and `give_g`
+## and gets `get_lots` and `get_g`. It wants to come out clearly ahead on lot
+## value plus G (TRADE_MARGIN), counts a lot in a block it is building (owns
+## another lot of) as worth more to keep or to win, and keeps its reserve.
+const TRADE_MARGIN := 1.15
+const TRADE_BLOCK_BONUS := 1.5
+
+static func accepts_trade(g: GameState, p: PlayerState, give_lots: Array, give_g: int,
+		get_lots: Array, get_g: int) -> bool:
+	if p.cash - give_g + get_g < reserve(g, p) / 2:
+		return false
+	var giving := float(give_g)
+	for id in give_lots:
+		giving += _worth_to(g, p, id)
+	var getting := float(get_g)
+	for id in get_lots:
+		getting += _worth_to(g, p, id)
+	return getting > 0 and getting >= giving * TRADE_MARGIN
+
+
+## A lot's value to p: more if p owns another lot in its block.
+static func _worth_to(g: GameState, p: PlayerState, id: int) -> float:
+	var block: String = g.space(id).block
+	var mine := g.owned_in_block(p.index, block) - (1 if g.lots[id].owner == p.index else 0)
+	return g.lot_value(id) * (TRADE_BLOCK_BONUS if mine > 0 else 1.0)

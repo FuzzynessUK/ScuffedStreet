@@ -3,7 +3,8 @@ extends RefCounted
 ## A board loaded from JSON (format: boards/README.md). Read-only after loading.
 
 const TYPES := ["depot", "relay", "lot", "market", "wildcard", "workshop",
-		"toll", "jackpot", "detour", "junction"]
+		"toll", "detour", "junction", "dice", "arcade",
+		"interest", "break", "plot"]
 
 var name := ""
 var goal := 10000

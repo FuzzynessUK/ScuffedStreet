@@ -1,0 +1,13 @@
+# An outer ring of cheaper shops with two short cuts into an inner ring of
+# pricey ones: quicker round, but dearer to land on.
+name: Spiral Market
+goal: 8000
+name_offset: 24
+map:
+a a S a * b b R b
+C . . . ? . . . b
+a . e e M e e . b
+D . P . . . P . H
+d . f f ? f f . c
+d . . . X . . . c
+d R d d V c c P c

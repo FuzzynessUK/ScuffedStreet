@@ -1,0 +1,19 @@
+# A ring in the middle with four arms; each suit sits at the end of an arm,
+# so you go out to it and turn round. Four crossings to choose at.
+name: Crossroads
+goal: 8000
+name_offset: 36
+map:
+. . . . . . S . . . . . .
+. . . . . . a . . . . . .
+. . . . . . R . . . . . .
+. . . . . . a . . . . . .
+. . . . D a P a * . . . .
+. . . . d . . . b . . . .
+C d ? d P . . . X b ? b H
+. . . . d . . . b . . . .
+. . . . d c P c M . . . .
+. . . . . . c . . . . . .
+. . . . . . R . . . . . .
+. . . . . . c . . . . . .
+. . . . . . V . . . . . .

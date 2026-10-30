@@ -1,7 +1,8 @@
 class_name Character
 extends Node3D
 ## A placeholder walking figure built from primitives: head, body, two arms and
-## two legs that swing while walk_to() is moving it, and celebrate() for paydays.
+## two legs that swing while walk_to() is moving it, celebrate() for paydays
+## and punch() for hitting the dice block.
 
 const HEIGHT := 0.5
 const STRIDE_SPEED := 14.0  # radians of swing phase per second
@@ -9,6 +10,9 @@ const SWING := 0.7          # max limb swing, radians
 const SKIN := Color("#f1c9a5")
 const TROUSERS := Color("#2f3140")
 const CELEBRATE_SECONDS := 1.8
+const BID_SECONDS := 0.6
+const PUNCH_SECONDS := 0.45
+const PUNCH_IMPACT := 0.15  # seconds into a punch when the fist is highest
 
 var _legs: Array[Node3D] = []
 var _arms: Array[Node3D] = []
@@ -16,6 +20,8 @@ var _body: Node3D
 var _phase := 0.0
 var _walking := false
 var _celebrating := 0.0  # seconds of celebration left
+var _bidding := 0.0      # seconds of a bid reaction left
+var _punching := 0.0     # seconds of a punch left
 
 
 func setup(color: Color) -> void:
@@ -64,7 +70,37 @@ func celebrate() -> void:
 	rotation.y = 0.0
 
 
+## A bid at an auction: one arm shoots up with a little hop.
+func bid() -> void:
+	_bidding = BID_SECONDS
+
+
+## Punches the dice block over its head: a jump with one fist thrust straight
+## up, highest at PUNCH_IMPACT, facing the camera.
+func punch() -> void:
+	_punching = PUNCH_SECONDS
+	rotation.y = 0.0
+
+
 func _process(delta: float) -> void:
+	if _punching > 0.0:
+		_punching -= delta
+		var t := PUNCH_SECONDS - _punching
+		# Up fast to the hit, then back down over the rest.
+		var k := t / PUNCH_IMPACT if t < PUNCH_IMPACT else clampf(1.0 - (t - PUNCH_IMPACT) / (PUNCH_SECONDS - PUNCH_IMPACT), 0.0, 1.0)
+		_arms[1].rotation.x = -3.1 * k
+		_arms[0].rotation.x = 0.5 * k
+		_legs[0].rotation.x = -0.3 * k
+		_legs[1].rotation.x = 0.2 * k
+		_body.position.y = k * 0.2
+		return
+	if _bidding > 0.0 and _celebrating <= 0.0:
+		_bidding -= delta
+		var k := sin(PI * clampf(1.0 - _bidding / BID_SECONDS, 0.0, 1.0))  # up and back down
+		_arms[1].rotation.x = -2.9 * k
+		_arms[0].rotation.x = 0.3 * k
+		_body.position.y = k * 0.09
+		return
 	if _celebrating > 0.0:
 		_celebrating -= delta
 		var t := CELEBRATE_SECONDS - _celebrating

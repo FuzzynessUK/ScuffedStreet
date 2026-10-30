@@ -1,0 +1,11 @@
+# Two loops joined at a crossing in the middle. Your route choice decides
+# which suits you pick up: two are on each loop.
+name: Figure Eight
+goal: 8000
+name_offset: 0
+map:
+a a S a P . b b H b b
+? . . . a . X . . . P
+D . . . * + M . . . R
+c . . . c . d . . . ?
+c c V c P . d d C R d
